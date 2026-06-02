@@ -1,0 +1,17 @@
+.env.ps1
+*.exe
+*.dll
+bin/
+
+.test-results/
+
+.local
+
+crawler-output.json
+
+out/
+coverage.out
+
+# sqlite
+*-shm
+*-wal

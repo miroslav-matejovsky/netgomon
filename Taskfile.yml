@@ -1,0 +1,142 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+
+version: "3"
+
+tasks:
+  default:
+    desc: List all tasks
+    cmds:
+      - task --list
+    silent: true
+
+  clean:
+    desc: Remove build artifacts, .test-results, and .exe files
+    silent: true
+    cmds:
+      - pwsh -NoProfile -NonInteractive -File taskfiles/clean.ps1{{if .QUIET}} > NUL 2>&1{{end}}
+      - echo clean done
+
+  tidy:
+    desc: Run go mod tidy to clean up dependencies
+    silent: true
+    cmds:
+      - go mod tidy
+      - echo tidy done
+
+  vet:
+    desc: Run go vet to check for potential issues
+    silent: true
+    cmds:
+      - go vet ./...
+      - echo vet done
+
+  fmt:
+    desc: Run go fmt to format the code
+    silent: true
+    cmds:
+      - go fmt ./...
+      - echo fmt done
+
+  lint:
+    desc: Run golangci-lint
+    silent: true
+    cmds:
+      - echo "Running golangci-lint. This may take a moment..."
+      - golangci-lint run ./...
+      - echo lint done
+
+  lint-fix:
+    desc: Run golangci-lint with auto-fix
+    silent: true
+    cmds:
+      - golangci-lint run --fix ./...
+      - echo lint-fix done
+
+  arch-lint:
+    desc: Run go-arch-lint to check package dependencies and architectural rules
+    silent: true
+    cmds:
+      - go-arch-lint check
+      - echo arch-lint done
+
+  deadcode:
+    desc: Check for unreachable functions in cmd entry points
+    silent: true
+    cmds:
+      - pwsh -NoProfile -NonInteractive -File taskfiles/deadcode.ps1
+
+  test:
+    desc: Run unit tests (saved to .test-results/)
+    silent: true
+    cmds:
+      - pwsh -NoProfile -NonInteractive -File taskfiles/test.ps1
+
+  coverage:
+    desc: Run unit+integration tests with coverage, enforce 50% threshold
+    silent: true
+    cmds:
+      - pwsh -NoProfile -NonInteractive -File taskfiles/coverage.ps1
+
+  test-integration:
+    desc: Run integration tests (requires LLM model download, saved to .test-results/)
+    silent: true
+    cmds:
+      - pwsh -NoProfile -NonInteractive -File taskfiles/test-integration.ps1
+
+  fast:
+    desc: Run fast checks and tests
+    silent: true
+    cmds:
+      - task: clean
+        # Set QUIET=1 to suppress output from clean since it can be very verbose and is not the main focus of this task.
+        vars:
+          QUIET: "1"
+      - task: tidy
+      - task: vet
+      - task: fmt
+      - task: test
+      - echo all done
+
+  all:
+    desc: Run all checks and tests
+    silent: true
+    cmds:
+      - task: clean
+        # Set QUIET=1 to suppress output from clean since it can be very verbose and is not the main focus of this task.
+        vars:
+          QUIET: "1"
+      - task: tidy
+      - task: vet
+      - task: fmt
+      # - task: lint
+      # - task: arch-lint
+      - task: deadcode
+      - task: test
+      # - task: coverage
+      # - task: test-integration
+      - echo all done
+
+  # --- running stuff ---
+
+  # --- maintenance ---
+
+  deps:
+    desc: List direct dependencies with available updates
+    silent: true
+    cmds:
+      - go mod tidy
+      - go list -u -m -f "{{`{{if not .Indirect}}{{.}}{{end}}`}}" all
+
+  go-tools:
+    desc: Install or update required Go tools
+    silent: true
+    cmds:
+      - echo "go-arch-lint for keeping package dependencies in check and enforcing architectural rules"
+      - go install github.com/fe3dback/go-arch-lint@latest
+      - echo "deadcode for clean code by detecting unused functions"
+      - go install golang.org/x/tools/cmd/deadcode@latest
+      - echo "gotestsum for improved test output formatting"
+      - go install gotest.tools/gotestsum@latest
+      - echo "goman for better man pages"
+      - go install github.com/appliedgocode/goman@latest
+      - echo done
