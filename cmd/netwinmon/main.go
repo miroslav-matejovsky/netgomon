@@ -2,13 +2,14 @@ package main
 
 import (
 	"fmt"
-	"time"
+	"os"
+
+	"github.com/miroslav-matejovsky/netgomon/internal/cli"
 )
 
-func log(msg string) {
-	fmt.Printf("[%s] %s\n", time.Now().Format("15:04:05"), msg)
-}
-
 func main() {
-	log("Starting network verifier")
+	if err := cli.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 }

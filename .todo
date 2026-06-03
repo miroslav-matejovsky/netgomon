@@ -1,2 +1,1 @@
-- Add Pester unit tests for scripts (Invoke-NetworkMonitorProcess.ps1, Invoke-NetworkEnforceProcess.ps1)
-- Implement automated log rotation or cleanup for the local logs directory
+- Implement ETW session support as a v2 monitoring engine to trace transient/short-lived TCP connections
