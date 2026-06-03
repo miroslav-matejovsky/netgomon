@@ -3,7 +3,6 @@
 package monitor
 
 import (
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -49,8 +48,9 @@ func (l *Logger) Info(msg string, args ...any) {
 	if l == nil || l.logger == nil {
 		return
 	}
-	l.logger.Info(msg, args...)
-	fmt.Printf("[%s] INFO: %s\n", time.Now().Format("15:04:05.000"), formatMsg(msg, args...))
+	formatted := formatMsg(msg, args...)
+	l.logger.Info(formatted)
+	fmt.Printf("[%s] INFO: %s\n", time.Now().Format("15:04:05.000"), formatted)
 }
 
 // Warn logs warn level message.
@@ -58,8 +58,9 @@ func (l *Logger) Warn(msg string, args ...any) {
 	if l == nil || l.logger == nil {
 		return
 	}
-	l.logger.Warn(msg, args...)
-	fmt.Printf("[%s] WARN: %s\n", time.Now().Format("15:04:05.000"), formatMsg(msg, args...))
+	formatted := formatMsg(msg, args...)
+	l.logger.Warn(formatted)
+	fmt.Printf("[%s] WARN: %s\n", time.Now().Format("15:04:05.000"), formatted)
 }
 
 // Error logs error level message.
@@ -67,9 +68,9 @@ func (l *Logger) Error(msg string, err error, args ...any) {
 	if l == nil || l.logger == nil {
 		return
 	}
-	fullArgs := append([]any{"error", err}, args...)
-	l.logger.Error(msg, fullArgs...)
-	fmt.Printf("[%s] ERROR: %s (error: %v)\n", time.Now().Format("15:04:05.000"), formatMsg(msg, args...), err)
+	formatted := formatMsg(msg, args...)
+	l.logger.Error(formatted, "error", err)
+	fmt.Printf("[%s] ERROR: %s (error: %v)\n", time.Now().Format("15:04:05.000"), formatted, err)
 }
 
 // Debug logs debug level message.
@@ -77,7 +78,8 @@ func (l *Logger) Debug(msg string, args ...any) {
 	if l == nil || l.logger == nil {
 		return
 	}
-	l.logger.Debug(msg, args...)
+	formatted := formatMsg(msg, args...)
+	l.logger.Debug(formatted)
 }
 
 func formatMsg(msg string, args ...any) string {
@@ -258,6 +260,11 @@ func (m *Monitor) monitorPID(pid uint32, path string) error {
 		etwEng = nil
 	}
 
+	// Write initial report.
+	if err := m.writeReport(pid, path, startTime, startTime, engineUsed, tcpMap, udpMap, etwEng); err != nil {
+		m.logger.Warn("Failed to write initial report: %v", err)
+	}
+
 	m.logger.Info("Monitoring network activity of PID %d... Press Ctrl+C to abort.", pid)
 
 	// Helper to snap tables (only used if falling back to polling engine).
@@ -332,6 +339,11 @@ func (m *Monitor) monitorPID(pid uint32, path string) error {
 	for {
 		snap()
 
+		// Continuously update report.
+		if err := m.writeReport(pid, path, startTime, time.Now(), engineUsed, tcpMap, udpMap, etwEng); err != nil {
+			m.logger.Debug("Failed to write continuous report: %v", err)
+		}
+
 		event, err := windows.WaitForSingleObject(h, 0)
 		if err == nil && event == windows.WAIT_OBJECT_0 {
 			m.logger.Info("Target process exit detected by WaitForSingleObject.")
@@ -342,6 +354,9 @@ func (m *Monitor) monitorPID(pid uint32, path string) error {
 
 	// Final sweep if polling.
 	snap()
+
+	// Give ETW consumer a moment to process any final buffered flush events.
+	time.Sleep(500 * time.Millisecond)
 
 	// Stop ETW trace session if it was started.
 	if etwEng != nil {
@@ -358,55 +373,15 @@ func (m *Monitor) monitorPID(pid uint32, path string) error {
 		m.logger.Warn("Failed to get process exit times: %v. Using current time.", err)
 	}
 
-	m.logger.Info("Process exited. Generating report...")
+	m.logger.Info("Process exited. Generating final report...")
 
-	// Convert maps to slices under lock protection (just in case).
-	var tcpConns []TCPEndpointRecord
-	var udpEps []UDPEndpointRecord
-
-	if etwEng != nil {
-		etwEng.mu.Lock()
-	}
-	for _, rec := range tcpMap {
-		tcpConns = append(tcpConns, *rec)
-	}
-	for _, rec := range udpMap {
-		udpEps = append(udpEps, *rec)
-	}
-	if etwEng != nil {
-		etwEng.mu.Unlock()
+	// Write final report.
+	if err := m.writeReport(pid, path, startTime, endTime, engineUsed, tcpMap, udpMap, etwEng); err != nil {
+		m.logger.Error("Failed to write final report", err)
+	} else {
+		m.logger.Info("Report written successfully. Total TCP remote endpoints: %d, UDP remote endpoints: %d.", len(tcpMap), len(udpMap))
 	}
 
-	report := Report{
-		PID:            pid,
-		Path:           path,
-		StartTime:      startTime.UTC().Format(time.RFC3339),
-		EndTime:        endTime.UTC().Format(time.RFC3339),
-		Engine:         engineUsed,
-		TCPConnections: tcpConns,
-		UDPEndpoints:   udpEps,
-	}
-
-	// Write report.json
-	reportBytes, err := json.MarshalIndent(report, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to serialize report: %w", err)
-	}
-
-	// Ensure report parent directory exists
-	if dir := filepath.Dir(m.ReportPath); dir != "." {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			m.logger.Warn("Failed to create report directory %s: %v", dir, err)
-		}
-	}
-
-	m.logger.Info("Writing report to %s...", m.ReportPath)
-	err = os.WriteFile(m.ReportPath, reportBytes, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to write report.json: %w", err)
-	}
-
-	m.logger.Info("Report written successfully. Total TCP remote endpoints: %d, UDP remote endpoints: %d.", len(tcpConns), len(udpEps))
 	return nil
 }
 
