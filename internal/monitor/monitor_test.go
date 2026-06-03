@@ -19,12 +19,12 @@ func TestInferHTTP(t *testing.T) {
 }
 
 func TestMonitorMatch(t *testing.T) {
-	m := NewMonitor("probe.exe", 100*time.Millisecond)
+	m := NewMonitor("probe.exe", "report.json", "monitor.log", 100*time.Millisecond)
 	require.True(t, m.match(`C:\dev\personal\netwinmon\cmd\probe\probe.exe`))
 	require.True(t, m.match(`probe.exe`))
 	require.False(t, m.match(`C:\windows\system32\cmd.exe`))
 
-	mFull := NewMonitor(`C:\dev\personal\netwinmon\cmd\probe\probe.exe`, 100*time.Millisecond)
+	mFull := NewMonitor(`C:\dev\personal\netwinmon\cmd\probe\probe.exe`, "report.json", "monitor.log", 100*time.Millisecond)
 	require.True(t, mFull.match(`c:\dev\personal\netwinmon\cmd\probe\probe.exe`))
 	require.False(t, mFull.match(`C:\dev\personal\netwinmon\cmd\probe\other.exe`))
 }

@@ -21,14 +21,23 @@ func Run() error {
 
 	if len(os.Args) < 2 {
 		printUsage()
-		return errors.New("target executable path not provided")
+		return errors.New("missing arguments")
 	}
 
-	target := os.Args[1]
-	if target == "-h" || target == "--help" || target == "help" {
+	firstArg := os.Args[1]
+	if firstArg == "-h" || firstArg == "--help" || firstArg == "help" {
 		printUsage()
 		return nil
 	}
+
+	if len(os.Args) < 4 {
+		printUsage()
+		return errors.New("missing arguments: path to target exe, report json path, and monitor log path are required")
+	}
+
+	target := os.Args[1]
+	reportPath := os.Args[2]
+	logPath := os.Args[3]
 
 	// Verify target is valid.
 	if stringsContainsSeparator(target) {
@@ -36,12 +45,10 @@ func Run() error {
 		if err != nil {
 			return fmt.Errorf("invalid path: %w", err)
 		}
-		// Note: The file doesn't have to exist *yet* because the tool waits for the next process instance.
-		// But checking if directory exists is nice. For simplicity, we just pass the path.
 		target = absPath
 	}
 
-	m := monitor.NewMonitor(target, 100*time.Millisecond)
+	m := monitor.NewMonitor(target, reportPath, logPath, 100*time.Millisecond)
 	return m.Run()
 }
 
@@ -50,14 +57,10 @@ func isAdmin() bool {
 }
 
 func printUsage() {
-	fmt.Println("Usage: netwinmon.exe <path-to-target-executable>")
-	fmt.Println()
-	fmt.Println("Options:")
-	fmt.Println("  -h, --help    Show help message")
+	fmt.Println("Usage: netwinmon.exe <path-to-target-executable> <path-to-report-json> <path-to-monitor-log>")
 	fmt.Println()
 	fmt.Println("Example:")
-	fmt.Println("  netwinmon.exe C:\\dev\\personal\\netwinmon\\cmd\\probe\\probe.exe")
-	fmt.Println("  netwinmon.exe probe.exe")
+	fmt.Println("  netwinmon.exe probe.exe report.json monitor.log")
 }
 
 func stringsContainsSeparator(s string) bool {

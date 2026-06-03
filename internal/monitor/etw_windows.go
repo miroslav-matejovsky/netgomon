@@ -23,10 +23,11 @@ type ETWEngine struct {
 	mu          sync.Mutex
 	ctx         context.Context
 	cancel      context.CancelFunc
+	logger      *Logger
 }
 
 // NewETWEngine creates a new ETW tracing engine for the target PID.
-func NewETWEngine(targetPID uint32, tcpMap map[string]*TCPEndpointRecord, udpMap map[string]*UDPEndpointRecord) *ETWEngine {
+func NewETWEngine(targetPID uint32, tcpMap map[string]*TCPEndpointRecord, udpMap map[string]*UDPEndpointRecord, logger *Logger) *ETWEngine {
 	sessionName := fmt.Sprintf("NetWinMon_%d_%d", targetPID, time.Now().Unix())
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ETWEngine{
@@ -36,6 +37,7 @@ func NewETWEngine(targetPID uint32, tcpMap map[string]*TCPEndpointRecord, udpMap
 		udpMap:      udpMap,
 		ctx:         ctx,
 		cancel:      cancel,
+		logger:      logger,
 	}
 }
 
@@ -68,7 +70,11 @@ func (e *ETWEngine) Start() error {
 			return nil
 		}
 
-		remoteIP, remotePort, _, _, isUDP, state := parseEventNetworkTuple(event)
+		remoteIP, remotePort, localIP, localPort, isUDP, state := parseEventNetworkTuple(event)
+
+		e.logger.Log("ETW Event: EventID=%d ProcessID=%d Remote=%s:%d Local=%s:%d IsUDP=%t State=%s",
+			event.System.EventID, event.System.Execution.ProcessID, remoteIP, remotePort, localIP, localPort, isUDP, state)
+
 		if remoteIP == "" || remotePort == 0 {
 			return nil
 		}
@@ -209,9 +215,6 @@ func parseIP(val interface{}) string {
 			return net.IP(v).String()
 		}
 	case uint32:
-		// Host byte order vs network byte order.
-		// Microsoft-Windows-Kernel-Network logs as integer in network byte order or host byte order.
-		// Standard is standard IPv4 representation.
 		ip := net.IPv4(byte(v), byte(v>>8), byte(v>>16), byte(v>>24))
 		return ip.String()
 	}
