@@ -83,6 +83,13 @@ tasks:
     cmds:
       - pwsh -NoProfile -NonInteractive -File taskfiles/test-integration.ps1
 
+  build:
+    desc: Build the application (output in dist/)
+    silent: true
+    cmds:
+      - go build -o dist/netwinmon.exe ./cmd
+      - echo build done in dist/netwinmon.exe
+
   fast:
     desc: Run fast checks and tests
     silent: true
@@ -121,7 +128,7 @@ tasks:
   run:
     desc: Run the application
     cmds:
-      - go run ./cmd/** fast
+      - go run ./cmd/**
 
   # --- maintenance ---
 

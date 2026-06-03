@@ -13,9 +13,20 @@ func log(msg string) {
 func main() {
 	log("Starting network test client")
 
-	interval := 10 * time.Second
-	if len(os.Args) > 1 && os.Args[1] == "fast" {
-		interval = 3 * time.Second
+	interval := 3 * time.Second
+	arg := "normal"
+	if len(os.Args) > 1 {
+		arg = os.Args[1]
+	}
+	switch arg {
+	case "fast":
+		log("Running in FAST mode (1s interval)")
+		interval = 1 * time.Second
+	case "slow":
+		log("Running in SLOW mode (10s interval)")
+		interval = 10 * time.Second
+	default:
+		log("Running in NORMAL mode (3s interval)")
 	}
 
 	i := 1
