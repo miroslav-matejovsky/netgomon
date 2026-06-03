@@ -10,6 +10,9 @@ bin/
 crawler-output.json
 
 out/
+dist/
+logs/
+*.exe
 coverage.out
 
 # sqlite

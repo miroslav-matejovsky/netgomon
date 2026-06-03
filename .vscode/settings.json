@@ -64,17 +64,27 @@
   ],
   "cSpell.words": [
     "appliedgocode",
+    "connectionless",
     "covermode",
     "coverprofile",
     "deadcode",
     "fe3dback",
+    "filetime",
     "golangci",
     "goman",
+    "gopls",
     "gotest",
     "gotestsum",
     "LASTEXITCODE",
-    "netgomon",
+    "Matejovsky",
+    "Miroslav",
+    "netsh",
+    "netwinmon",
+    "nsecs",
+    "pids",
+    "SNAPPROCESS",
     "taskfiles",
+    "Toolhelp",
     "venv"
   ]
 }

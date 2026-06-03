@@ -1,5 +1,5 @@
 # Remove build artifacts, test results, and .exe files from repo
-$foldersToRemove = @(".test-results", ".cache", "site", "bin")
+$foldersToRemove = @(".test-results", ".cache", "site", "bin", "logs", "dist")
 foreach ($folder in $foldersToRemove) {
   Write-Host "removing folder: $folder"
   if (Test-Path $folder) {
