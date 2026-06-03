@@ -118,6 +118,11 @@ tasks:
 
   # --- running stuff ---
 
+  run:
+    desc: Run the application
+    cmds:
+      - go run ./cmd/** fast
+
   # --- maintenance ---
 
   deps:
