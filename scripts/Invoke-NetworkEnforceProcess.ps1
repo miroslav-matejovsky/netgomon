@@ -1,20 +1,17 @@
 <#
 .SYNOPSIS
-    Wraps an executable with Windows network monitoring and optional outbound restrictions.
+    Wraps an executable with Windows network monitoring and outbound restrictions.
 
 .DESCRIPTION
-    Invoke-ProcNetWrap.ps1 is a small self-contained CLI-style wrapper for Windows that can:
+    Invoke-NetworkEnforceProcess.ps1 is a small self-contained CLI-style wrapper for Windows that can:
 
       1. Run a target executable.
-      2. In Monitor mode:
-         - apply no network restrictions
+      2. Enforce mode:
+         - create a temporary block-all-outbound rule for the target executable
+         - add explicit outbound allow rules for approved remote IP/port combinations
          - enable firewall logging
          - optionally start a WFP capture
          - optionally record TCP connection snapshots
-      3. In Enforce mode:
-         - create a temporary block-all-outbound rule for the target executable
-         - add explicit outbound allow rules for approved remote IP/port combinations
-         - enable logging/capture as above
          - remove temporary rules on exit
 
     Architectural notes:
@@ -30,26 +27,15 @@
 .PARAMETER ExePath
     Full path to the executable to run.
 
-.PARAMETER Mode
-    Operating mode.
-
-    Monitor
-        No firewall rules are created. The process runs without outbound restrictions.
-        Logging and capture options still apply.
-
-    Enforce
-        Creates a temporary block-all-outbound rule for the target executable and
-        then adds allow rules for approved remote IPs and ports.
-
 .PARAMETER AllowedRemoteAddresses
     Approved remote IP addresses, CIDR ranges, or values accepted by Windows Firewall
-    for RemoteAddress. Only used in Enforce mode.
+    for RemoteAddress.
 
 .PARAMETER AllowedRemotePorts
-    Approved remote ports. Only used in Enforce mode.
+    Approved remote ports.
 
 .PARAMETER Protocol
-    Transport protocol for allow rules in Enforce mode.
+    Transport protocol for allow rules.
     Accepted values: TCP, UDP, Any
 
 .PARAMETER Arguments
@@ -91,25 +77,13 @@
     Exports a rule audit for rules created by this wrapper session.
 
 .PARAMETER StrictAllowList
-    In Enforce mode:
-      - if set and no allowlist is supplied, the process gets no outbound access
-      - if not set and no allowlist is supplied, the script throws before launch
-
-.EXAMPLE
-    # Monitoring only, no restrictions, full diagnostics
-    .\Invoke-ProcNetWrap.ps1 `
-      -ExePath "C:\Tools\MyApp\myapp.exe" `
-      -Mode Monitor `
-      -EnableWfpCapture `
-      -EnableFirewallLogAllowed `
-      -EnableFirewallLogBlocked `
-      -EnableTcpSnapshots
+    - if set and no allowlist is supplied, the process gets no outbound access
+    - if not set and no allowlist is supplied, the script throws before launch
 
 .EXAMPLE
     # Strict enforcement: only TCP 443 to one remote address
-    .\Invoke-ProcNetWrap.ps1 `
+    .\Invoke-NetworkEnforceProcess.ps1 `
       -ExePath "C:\Tools\MyApp\myapp.exe" `
-      -Mode Enforce `
       -AllowedRemoteAddresses "203.0.113.10" `
       -AllowedRemotePorts 443 `
       -Protocol TCP `
@@ -119,21 +93,15 @@
 
 .EXAMPLE
     # Enforce mode with explicit full deny (no allow rules)
-    .\Invoke-ProcNetWrap.ps1 `
+    .\Invoke-NetworkEnforceProcess.ps1 `
       -ExePath "C:\Tools\MyApp\myapp.exe" `
-      -Mode Enforce `
       -StrictAllowList
 
 .EXAMPLE
     # Display help
-    Get-Help .\Invoke-ProcNetWrap.ps1 -Full
+    Get-Help .\Invoke-NetworkEnforceProcess.ps1 -Full
 
 .NOTES
-    Authoring intent:
-      - Mini CLI tool
-      - Temporary rules only
-      - Monitoring and enforcement separated explicitly
-
     Important limitations:
       - Rules are scoped to the executable path. If the target process spawns a helper
         executable that performs networking, that helper is not automatically covered.
@@ -148,10 +116,6 @@ param(
     [string]$ExePath,
 
     [Parameter(Position = 1)]
-    [ValidateSet('Monitor', 'Enforce')]
-    [string]$Mode = 'Monitor',
-
-    [Parameter()]
     [string[]]$AllowedRemoteAddresses = @(),
 
     [Parameter()]
@@ -270,10 +234,10 @@ function Get-ProcNetWrapPaths {
     return [pscustomobject]@{
         Timestamp       = $timestamp
         ExeName         = $exeName
-        RunLog          = Join-Path $LogRoot "$exeName-$timestamp-wrapper.log"
-        NetstatLog      = Join-Path $LogRoot "$exeName-$timestamp-netstat.log"
-        RuleAuditLog    = Join-Path $LogRoot "$exeName-$timestamp-rules.txt"
-        WfpCaptureBase  = Join-Path $LogRoot "$exeName-$timestamp-wfp"
+        RunLog          = Join-Path $LogRoot "$exeName-$timestamp-enforce-wrapper.log"
+        NetstatLog      = Join-Path $LogRoot "$exeName-$timestamp-enforce-netstat.log"
+        RuleAuditLog    = Join-Path $LogRoot "$exeName-$timestamp-enforce-rules.txt"
+        WfpCaptureBase  = Join-Path $LogRoot "$exeName-$timestamp-enforce-wfp"
         FirewallLog     = "$env:SystemRoot\System32\LogFiles\Firewall\pfirewall.log"
     }
 }
@@ -496,13 +460,12 @@ $paths         = Get-ProcNetWrapPaths -ExePath $ExePath -LogRoot $LogRoot
 $script:RunLog = $paths.RunLog
 
 $sessionId     = New-SessionId
-$sessionPrefix = "ProcNetWrap $($paths.ExeName) $sessionId"
+$sessionPrefix = "ProcNetEnforce $($paths.ExeName) $sessionId"
 $ruleGroup     = $sessionPrefix
 
 $createdRuleNames = [System.Collections.Generic.List[string]]::new()
 
-Write-RunLog "Starting ProcNetWrap session"
-Write-RunLog "Mode=$Mode"
+Write-RunLog "Starting ProcNetEnforce session"
 Write-RunLog "ExePath=$ExePath"
 Write-RunLog "WorkingDirectory=$WorkingDirectory"
 Write-RunLog "Arguments=$Arguments"
@@ -528,23 +491,15 @@ try {
         -LogAllowed ([bool]$EnableFirewallLogAllowed) `
         -LogBlocked ([bool]$EnableFirewallLogBlocked)
 
-    switch ($Mode) {
-        'Monitor' {
-            Write-RunLog "Monitor mode selected: no firewall restrictions will be created"
-        }
-
-        'Enforce' {
-            Add-EnforcementRules `
-                -ExePath $ExePath `
-                -RuleGroup $ruleGroup `
-                -SessionPrefix $sessionPrefix `
-                -AllowedRemoteAddresses $AllowedRemoteAddresses `
-                -AllowedRemotePorts $AllowedRemotePorts `
-                -Protocol $Protocol `
-                -CreatedRuleNames $createdRuleNames `
-                -StrictAllowList ([bool]$StrictAllowList)
-        }
-    }
+    Add-EnforcementRules `
+        -ExePath $ExePath `
+        -RuleGroup $ruleGroup `
+        -SessionPrefix $sessionPrefix `
+        -AllowedRemoteAddresses $AllowedRemoteAddresses `
+        -AllowedRemotePorts $AllowedRemotePorts `
+        -Protocol $Protocol `
+        -CreatedRuleNames $createdRuleNames `
+        -StrictAllowList ([bool]$StrictAllowList)
 
     if ($EnableWfpCapture) {
         Start-WfpCapture -OutputBase $paths.WfpCaptureBase
@@ -588,7 +543,7 @@ finally {
         Remove-TemporaryRules -CreatedRuleNames $createdRuleNames
     }
 
-    Write-RunLog "ProcNetWrap session finished"
+    Write-RunLog "ProcNetEnforce session finished"
     Write-RunLog "RunLog=$($paths.RunLog)"
     Write-RunLog "FirewallLog=$($paths.FirewallLog)"
 
