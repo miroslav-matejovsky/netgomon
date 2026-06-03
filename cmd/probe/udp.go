@@ -18,7 +18,7 @@ func testUDP() {
 		log("UDP ERROR: " + err.Error())
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// minimal DNS query (not complete protocol, but enough to generate traffic)
 	payload := []byte{
@@ -43,7 +43,7 @@ func testUDP() {
 	}
 
 	buf := make([]byte, 512)
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	_, err = conn.Read(buf)
 	if err != nil {
 		log("UDP RECV (expected timeout or partial): " + err.Error())

@@ -19,7 +19,7 @@ func testHTTP() {
 		log("HTTP ERROR: " + err.Error())
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	log(fmt.Sprintf("HTTP SUCCESS: status=%s", resp.Status))
 }

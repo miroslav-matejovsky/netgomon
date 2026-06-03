@@ -14,41 +14,6 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// TCPRecord represents the aggregated record for a TCP connection.
-type TCPRecord struct {
-	LocalAddress  string `json:"local_address"`
-	LocalPort     uint16 `json:"local_port"`
-	RemoteAddress string `json:"remote_address"`
-	RemotePort    uint16 `json:"remote_port"`
-	State         string `json:"state"`
-	FirstSeen     string `json:"first_seen"`
-	LastSeen      string `json:"last_seen"`
-	Count         int    `json:"count"`
-	InferredHTTP  bool   `json:"inferred_http"`
-}
-
-// UDPRecord represents the aggregated record for a UDP endpoint.
-type UDPRecord struct {
-	LocalAddress  string `json:"local_address"`
-	LocalPort     uint16 `json:"local_port"`
-	RemoteAddress string `json:"remote_address"`
-	RemotePort    uint16 `json:"remote_port"`
-	FirstSeen     string `json:"first_seen"`
-	LastSeen      string `json:"last_seen"`
-	Count         int    `json:"count"`
-	InferredHTTP  bool   `json:"inferred_http"`
-}
-
-// Report represents the final output JSON format.
-type Report struct {
-	PID            uint32      `json:"pid"`
-	Path           string      `json:"path"`
-	StartTime      string      `json:"start_time"`
-	EndTime        string      `json:"end_time"`
-	TCPConnections []TCPRecord `json:"tcp_connections"`
-	UDPEndpoints   []UDPRecord `json:"udp_endpoints"`
-}
-
 // Monitor monitors the target executable's network activity.
 type Monitor struct {
 	TargetExe string
@@ -108,7 +73,7 @@ func (m *Monitor) findCurrentPIDs() (map[uint32]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer windows.CloseHandle(snapshot)
+	defer func() { _ = windows.CloseHandle(snapshot) }()
 
 	var entry windows.ProcessEntry32
 	entry.Size = uint32(unsafe.Sizeof(entry))
@@ -123,7 +88,7 @@ func (m *Monitor) findCurrentPIDs() (map[uint32]string, error) {
 			var buf [1024]uint16
 			size := uint32(len(buf))
 			err = windows.QueryFullProcessImageName(pHandle, 0, &buf[0], &size)
-			windows.CloseHandle(pHandle)
+			_ = windows.CloseHandle(pHandle)
 			if err == nil {
 				procPath := windows.UTF16ToString(buf[:size])
 				if m.match(procPath) {
@@ -163,7 +128,7 @@ func (m *Monitor) monitorPID(pid uint32, path string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open process handle: %w", err)
 	}
-	defer windows.CloseHandle(h)
+	defer func() { _ = windows.CloseHandle(h) }()
 
 	var creationTime, exitTime, kernelTime, userTime windows.Filetime
 	var startTime time.Time
@@ -173,35 +138,50 @@ func (m *Monitor) monitorPID(pid uint32, path string) error {
 		startTime = time.Now()
 	}
 
+	// Aggregation maps.
+	tcpMap := make(map[string]*TCPEndpointRecord)
+	udpMap := make(map[string]*UDPEndpointRecord)
+
+	var etwEng *ETWEngine
+	engineUsed := "polling"
+
+	// Try starting ETW session first.
+	etwEng = NewETWEngine(pid, tcpMap, udpMap)
+	if err := etwEng.Start(); err == nil {
+		fmt.Printf("Started ETW monitoring session for PID %d.\n", pid)
+		engineUsed = "etw"
+	} else {
+		fmt.Printf("Unable to start ETW trace session: %v.\nFalling back to IP Helper table polling engine...\n", err)
+		etwEng = nil
+	}
+
 	fmt.Printf("Monitoring network activity of PID %d... Press Ctrl+C to abort.\n", pid)
 
-	// Aggregation maps.
-	tcpMap := make(map[string]*TCPRecord)
-	udpMap := make(map[string]*UDPRecord)
-
-	// Helper to snap tables.
+	// Helper to snap tables (only used if falling back to polling engine).
 	snap := func() {
+		if engineUsed != "polling" {
+			return
+		}
 		nowStr := time.Now().UTC().Format(time.RFC3339)
 
 		// Snap TCP.
 		if tConns, err := GetTCPConnections(); err == nil {
 			for _, conn := range tConns {
 				if conn.PID == pid {
-					key := fmt.Sprintf("%s:%d-%s:%d-%s", conn.LocalIP, conn.LocalPort, conn.RemoteIP, conn.RemotePort, conn.State)
+					key := fmt.Sprintf("%s:%d", conn.RemoteIP, conn.RemotePort)
 					if rec, ok := tcpMap[key]; ok {
 						rec.LastSeen = nowStr
 						rec.Count++
+						rec.States[conn.State]++
 					} else {
-						tcpMap[key] = &TCPRecord{
-							LocalAddress:  conn.LocalIP.String(),
-							LocalPort:     conn.LocalPort,
+						tcpMap[key] = &TCPEndpointRecord{
 							RemoteAddress: conn.RemoteIP.String(),
 							RemotePort:    conn.RemotePort,
-							State:         conn.State,
 							FirstSeen:     nowStr,
 							LastSeen:      nowStr,
 							Count:         1,
-							InferredHTTP:  inferHTTP(conn.LocalPort, conn.RemotePort),
+							InferredHTTP:  inferHTTP(0, conn.RemotePort),
+							States:        map[string]int{conn.State: 1},
 						}
 					}
 				}
@@ -212,25 +192,22 @@ func (m *Monitor) monitorPID(pid uint32, path string) error {
 		if uEps, err := GetUDPEndpoints(); err == nil {
 			for _, ep := range uEps {
 				if ep.PID == pid {
-					// UDP is connectionless. Remote address/port from tables is wildcard.
 					remoteIP := "0.0.0.0"
 					if ep.LocalIP.To4() == nil {
 						remoteIP = "::"
 					}
-					key := fmt.Sprintf("%s:%d-%s:0", ep.LocalIP, ep.LocalPort, remoteIP)
+					key := fmt.Sprintf("%s:0", remoteIP)
 					if rec, ok := udpMap[key]; ok {
 						rec.LastSeen = nowStr
 						rec.Count++
 					} else {
-						udpMap[key] = &UDPRecord{
-							LocalAddress:  ep.LocalIP.String(),
-							LocalPort:     ep.LocalPort,
+						udpMap[key] = &UDPEndpointRecord{
 							RemoteAddress: remoteIP,
 							RemotePort:    0,
 							FirstSeen:     nowStr,
 							LastSeen:      nowStr,
 							Count:         1,
-							InferredHTTP:  inferHTTP(ep.LocalPort, 0),
+							InferredHTTP:  inferHTTP(0, 0),
 						}
 					}
 				}
@@ -249,8 +226,13 @@ func (m *Monitor) monitorPID(pid uint32, path string) error {
 		time.Sleep(m.Interval)
 	}
 
-	// Final sweep.
+	// Final sweep if polling.
 	snap()
+
+	// Stop ETW trace session if it was started.
+	if etwEng != nil {
+		etwEng.Stop()
+	}
 
 	var endTime time.Time
 	if err := windows.GetProcessTimes(h, &creationTime, &exitTime, &kernelTime, &userTime); err == nil {
@@ -261,14 +243,21 @@ func (m *Monitor) monitorPID(pid uint32, path string) error {
 
 	fmt.Printf("Process exited. Generating report...\n")
 
-	// Convert maps to slices.
-	var tcpConns []TCPRecord
+	// Convert maps to slices under lock protection (just in case).
+	var tcpConns []TCPEndpointRecord
+	var udpEps []UDPEndpointRecord
+
+	if etwEng != nil {
+		etwEng.mu.Lock()
+	}
 	for _, rec := range tcpMap {
 		tcpConns = append(tcpConns, *rec)
 	}
-	var udpEps []UDPRecord
 	for _, rec := range udpMap {
 		udpEps = append(udpEps, *rec)
+	}
+	if etwEng != nil {
+		etwEng.mu.Unlock()
 	}
 
 	report := Report{
@@ -276,6 +265,7 @@ func (m *Monitor) monitorPID(pid uint32, path string) error {
 		Path:           path,
 		StartTime:      startTime.UTC().Format(time.RFC3339),
 		EndTime:        endTime.UTC().Format(time.RFC3339),
+		Engine:         engineUsed,
 		TCPConnections: tcpConns,
 		UDPEndpoints:   udpEps,
 	}

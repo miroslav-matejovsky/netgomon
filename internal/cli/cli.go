@@ -46,12 +46,7 @@ func Run() error {
 }
 
 func isAdmin() bool {
-	token, err := windows.OpenCurrentProcessToken()
-	if err != nil {
-		return false
-	}
-	defer token.Close()
-	return token.IsElevated()
+	return windows.GetCurrentProcessToken().IsElevated()
 }
 
 func printUsage() {

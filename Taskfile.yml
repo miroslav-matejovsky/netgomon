@@ -90,6 +90,13 @@ tasks:
       - go build -o dist/netwinmon.exe ./cmd/netwinmon
       - echo build done in dist/netwinmon.exe
 
+  build-probe:
+    desc: Build the probe (output in dist/)
+    silent: true
+    cmds:
+      - go build -o dist/probe.exe ./cmd/probe
+      - echo build done in dist/probe.exe
+
   fast:
     desc: Run fast checks and tests
     silent: true
@@ -115,7 +122,7 @@ tasks:
       - task: tidy
       - task: vet
       - task: fmt
-      # - task: lint
+      - task: lint
       # - task: arch-lint
       - task: deadcode
       - task: test

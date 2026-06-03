@@ -18,10 +18,10 @@ func testTCP() {
 		log("TCP ERROR: " + err.Error())
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	log("TCP SUCCESS: connected")
 
 	// send small data
-	conn.Write([]byte("HEAD / HTTP/1.0\r\n\r\n"))
+	_, _ = conn.Write([]byte("HEAD / HTTP/1.0\r\n\r\n"))
 }
