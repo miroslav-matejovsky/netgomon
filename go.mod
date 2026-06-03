@@ -1,4 +1,4 @@
-module github.com/miroslav-matejovsky/netgomon
+module github.com/miroslav-matejovsky/netwinmon
 
 go 1.26.4
 

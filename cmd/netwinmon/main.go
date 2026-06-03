@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/miroslav-matejovsky/netgomon/internal/cli"
+	"github.com/miroslav-matejovsky/netwinmon/internal/cli"
 )
 
 func main() {

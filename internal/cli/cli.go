@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/miroslav-matejovsky/netgomon/internal/monitor"
+	"github.com/miroslav-matejovsky/netwinmon/internal/monitor"
 	"golang.org/x/sys/windows"
 )
 
