@@ -64,8 +64,15 @@
     Writes periodic 'netstat -ano -p tcp' snapshots to a log file while the wrapped
     process is running.
 
+.PARAMETER EnableUdpSnapshots
+    Writes periodic 'netstat -ano -p udp' snapshots to a log file while the wrapped
+    process is running.
+
+.PARAMETER EnableAll
+    Enables all monitoring and auditing options: WFP capture, allowed/blocked firewall logging, TCP/UDP netstat snapshots, and rule auditing.
+
 .PARAMETER SnapshotIntervalSeconds
-    Interval for TCP snapshots. Used only when -EnableTcpSnapshots is specified.
+    Interval for TCP/UDP snapshots. Used only when -EnableTcpSnapshots or -EnableUdpSnapshots is specified.
 
 .PARAMETER NoWindow
     Starts the target process hidden.
@@ -145,6 +152,12 @@ param(
 
     [Parameter()]
     [switch]$EnableTcpSnapshots,
+
+    [Parameter()]
+    [switch]$EnableUdpSnapshots,
+
+    [Parameter()]
+    [switch]$EnableAll,
 
     [Parameter()]
     [ValidateRange(1, 86400)]
@@ -435,8 +448,22 @@ function Write-TcpSnapshot {
     )
 
     $stamp = Get-Date -Format 's'
-    "===== $stamp PID=$Pid =====" | Out-File -FilePath $OutputPath -Append -Encoding utf8
+    "===== TCP $stamp PID=$Pid =====" | Out-File -FilePath $OutputPath -Append -Encoding utf8
     cmd /c "netstat -ano -p tcp" | Out-File -FilePath $OutputPath -Append -Encoding utf8
+}
+
+function Write-UdpSnapshot {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int]$Pid,
+
+        [Parameter(Mandatory = $true)]
+        [string]$OutputPath
+    )
+
+    $stamp = Get-Date -Format 's'
+    "===== UDP $stamp PID=$Pid =====" | Out-File -FilePath $OutputPath -Append -Encoding utf8
+    cmd /c "netstat -ano -p udp" | Out-File -FilePath $OutputPath -Append -Encoding utf8
 }
 
 # ----------------------------
@@ -448,6 +475,15 @@ Assert-Admin
 $ExePath = [System.IO.Path]::GetFullPath($ExePath)
 if (-not (Test-Path -LiteralPath $ExePath)) {
     throw "Executable not found: $ExePath"
+}
+
+if ($EnableAll) {
+    $EnableWfpCapture = $true
+    $EnableFirewallLogAllowed = $true
+    $EnableFirewallLogBlocked = $true
+    $EnableTcpSnapshots = $true
+    $EnableUdpSnapshots = $true
+    $ShowRuleAudit = $true
 }
 
 if ([string]::IsNullOrWhiteSpace($WorkingDirectory)) {
@@ -477,6 +513,8 @@ Write-RunLog "EnableWfpCapture=$EnableWfpCapture"
 Write-RunLog "EnableFirewallLogAllowed=$EnableFirewallLogAllowed"
 Write-RunLog "EnableFirewallLogBlocked=$EnableFirewallLogBlocked"
 Write-RunLog "EnableTcpSnapshots=$EnableTcpSnapshots"
+Write-RunLog "EnableUdpSnapshots=$EnableUdpSnapshots"
+Write-RunLog "EnableAll=$EnableAll"
 Write-RunLog "SnapshotIntervalSeconds=$SnapshotIntervalSeconds"
 Write-RunLog "NoWindow=$NoWindow"
 Write-RunLog "PassThruExitCode=$PassThruExitCode"
@@ -518,6 +556,9 @@ try {
         if ($EnableTcpSnapshots) {
             Write-TcpSnapshot -Pid $proc.Id -OutputPath $paths.NetstatLog
         }
+        if ($EnableUdpSnapshots) {
+            Write-UdpSnapshot -Pid $proc.Id -OutputPath $paths.NetstatLog
+        }
 
         Start-Sleep -Seconds $SnapshotIntervalSeconds
         $proc.Refresh()
@@ -549,6 +590,10 @@ finally {
 
     if ($EnableTcpSnapshots) {
         Write-RunLog "TcpSnapshotLog=$($paths.NetstatLog)"
+    }
+
+    if ($EnableUdpSnapshots) {
+        Write-RunLog "UdpSnapshotLog=$($paths.NetstatLog)"
     }
 
     if ($EnableWfpCapture) {

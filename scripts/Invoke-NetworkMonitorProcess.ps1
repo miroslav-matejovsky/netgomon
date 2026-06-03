@@ -48,8 +48,15 @@
     Writes periodic 'netstat -ano -p tcp' snapshots to a log file while the wrapped
     process is running.
 
+.PARAMETER EnableUdpSnapshots
+    Writes periodic 'netstat -ano -p udp' snapshots to a log file while the wrapped
+    process is running.
+
+.PARAMETER EnableAll
+    Enables all monitoring options: WFP capture, allowed/blocked firewall logging, and TCP/UDP netstat snapshots.
+
 .PARAMETER SnapshotIntervalSeconds
-    Interval for TCP snapshots. Used only when -EnableTcpSnapshots is specified.
+    Interval for TCP/UDP snapshots. Used only when -EnableTcpSnapshots or -EnableUdpSnapshots is specified.
 
 .PARAMETER NoWindow
     Starts the target process hidden.
@@ -98,10 +105,16 @@ param(
     [switch]$EnableFirewallLogAllowed,
 
     [Parameter()]
-    [switch]$EnableFirewallLogBlocked = $true,
+    [switch]$EnableFirewallLogBlocked,
 
     [Parameter()]
     [switch]$EnableTcpSnapshots,
+
+    [Parameter()]
+    [switch]$EnableUdpSnapshots,
+
+    [Parameter()]
+    [switch]$EnableAll,
 
     [Parameter()]
     [ValidateRange(1, 86400)]
@@ -164,15 +177,15 @@ function Get-ProcNetWrapPaths {
     )
 
     $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-    $exeName   = [System.IO.Path]::GetFileNameWithoutExtension($ExePath)
+    $exeName = [System.IO.Path]::GetFileNameWithoutExtension($ExePath)
 
     return [pscustomobject]@{
-        Timestamp       = $timestamp
-        ExeName         = $exeName
-        RunLog          = Join-Path $LogRoot "$exeName-$timestamp-monitor-wrapper.log"
-        NetstatLog      = Join-Path $LogRoot "$exeName-$timestamp-monitor-netstat.log"
-        WfpCaptureBase  = Join-Path $LogRoot "$exeName-$timestamp-monitor-wfp"
-        FirewallLog     = "$env:SystemRoot\System32\LogFiles\Firewall\pfirewall.log"
+        Timestamp      = $timestamp
+        ExeName        = $exeName
+        RunLog         = Join-Path $LogRoot "$exeName-$timestamp-monitor-wrapper.log"
+        NetstatLog     = Join-Path $LogRoot "$exeName-$timestamp-monitor-netstat.log"
+        WfpCaptureBase = Join-Path $LogRoot "$exeName-$timestamp-monitor-wfp"
+        FirewallLog    = "$env:SystemRoot\System32\LogFiles\Firewall\pfirewall.log"
     }
 }
 
@@ -184,13 +197,13 @@ function Start-WfpCapture {
 
     Write-RunLog "Starting WFP capture: $OutputBase"
     & netsh wfp capture start file="$OutputBase" cab=off traceonly=off |
-        Tee-Object -FilePath $script:RunLog -Append | Out-Null
+    Tee-Object -FilePath $script:RunLog -Append | Out-Null
 }
 
 function Stop-WfpCapture {
     Write-RunLog "Stopping WFP capture"
     & netsh wfp capture stop |
-        Tee-Object -FilePath $script:RunLog -Append | Out-Null
+    Tee-Object -FilePath $script:RunLog -Append | Out-Null
 }
 
 function Configure-FirewallLogging {
@@ -206,7 +219,7 @@ function Configure-FirewallLogging {
     )
 
     Write-RunLog "Configuring firewall profile logging"
-    Set-NetFirewallProfile -Profile Domain,Private,Public `
+    Set-NetFirewallProfile -Profile Domain, Private, Public `
         -LogFileName $FirewallLogPath `
         -LogAllowed $LogAllowed `
         -LogBlocked $LogBlocked
@@ -249,8 +262,22 @@ function Write-TcpSnapshot {
     )
 
     $stamp = Get-Date -Format 's'
-    "===== $stamp PID=$Pid =====" | Out-File -FilePath $OutputPath -Append -Encoding utf8
+    "===== TCP $stamp PID=$Pid =====" | Out-File -FilePath $OutputPath -Append -Encoding utf8
     cmd /c "netstat -ano -p tcp" | Out-File -FilePath $OutputPath -Append -Encoding utf8
+}
+
+function Write-UdpSnapshot {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int]$Pid,
+
+        [Parameter(Mandatory = $true)]
+        [string]$OutputPath
+    )
+
+    $stamp = Get-Date -Format 's'
+    "===== UDP $stamp PID=$Pid =====" | Out-File -FilePath $OutputPath -Append -Encoding utf8
+    cmd /c "netstat -ano -p udp" | Out-File -FilePath $OutputPath -Append -Encoding utf8
 }
 
 # ----------------------------
@@ -264,13 +291,21 @@ if (-not (Test-Path -LiteralPath $ExePath)) {
     throw "Executable not found: $ExePath"
 }
 
+if ($EnableAll) {
+    $EnableWfpCapture = $true
+    $EnableFirewallLogAllowed = $true
+    $EnableFirewallLogBlocked = $true
+    $EnableTcpSnapshots = $true
+    $EnableUdpSnapshots = $true
+}
+
 if ([string]::IsNullOrWhiteSpace($WorkingDirectory)) {
     $WorkingDirectory = Split-Path -Parent $ExePath
 }
 
 Ensure-Directory -Path $LogRoot
 
-$paths         = Get-ProcNetWrapPaths -ExePath $ExePath -LogRoot $LogRoot
+$paths = Get-ProcNetWrapPaths -ExePath $ExePath -LogRoot $LogRoot
 $script:RunLog = $paths.RunLog
 
 Write-RunLog "Starting ProcNetMonitor session"
@@ -282,6 +317,8 @@ Write-RunLog "EnableWfpCapture=$EnableWfpCapture"
 Write-RunLog "EnableFirewallLogAllowed=$EnableFirewallLogAllowed"
 Write-RunLog "EnableFirewallLogBlocked=$EnableFirewallLogBlocked"
 Write-RunLog "EnableTcpSnapshots=$EnableTcpSnapshots"
+Write-RunLog "EnableUdpSnapshots=$EnableUdpSnapshots"
+Write-RunLog "EnableAll=$EnableAll"
 Write-RunLog "SnapshotIntervalSeconds=$SnapshotIntervalSeconds"
 Write-RunLog "NoWindow=$NoWindow"
 Write-RunLog "PassThruExitCode=$PassThruExitCode"
@@ -311,6 +348,9 @@ try {
         if ($EnableTcpSnapshots) {
             Write-TcpSnapshot -Pid $proc.Id -OutputPath $paths.NetstatLog
         }
+        if ($EnableUdpSnapshots) {
+            Write-UdpSnapshot -Pid $proc.Id -OutputPath $paths.NetstatLog
+        }
 
         Start-Sleep -Seconds $SnapshotIntervalSeconds
         $proc.Refresh()
@@ -334,6 +374,10 @@ finally {
 
     if ($EnableTcpSnapshots) {
         Write-RunLog "TcpSnapshotLog=$($paths.NetstatLog)"
+    }
+
+    if ($EnableUdpSnapshots) {
+        Write-RunLog "UdpSnapshotLog=$($paths.NetstatLog)"
     }
 
     if ($EnableWfpCapture) {
