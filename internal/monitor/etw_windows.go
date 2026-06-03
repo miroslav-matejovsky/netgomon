@@ -74,7 +74,7 @@ func (e *ETWEngine) Start() error {
 
 		remoteIP, remotePort, localIP, localPort, isUDP, state := parseEventNetworkTuple(event)
 
-		e.logger.Log("ETW Event: EventID=%d ProcessID=%d Remote=%s:%d Local=%s:%d IsUDP=%t State=%s",
+		e.logger.Debug("ETW Event: EventID=%d ProcessID=%d Remote=%s:%d Local=%s:%d IsUDP=%t State=%s",
 			event.System.EventID, event.System.Execution.ProcessID, remoteIP, remotePort, localIP, localPort, isUDP, state)
 
 		if remoteIP == "" || remotePort == 0 {

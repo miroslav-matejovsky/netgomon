@@ -5,6 +5,7 @@ package monitor
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,28 +15,76 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// Logger handles writing debug/info messages to the monitor log file.
+// Logger handles writing debug/info messages to the monitor log file using slog.
 type Logger struct {
-	file *os.File
+	file   *os.File
+	logger *slog.Logger
 }
 
-// NewLogger initializes the log file.
+// NewLogger initializes the log directory and file.
 func NewLogger(path string) (*Logger, error) {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create log directory: %w", err)
+	}
+
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
 		return nil, err
 	}
-	return &Logger{file: f}, nil
+
+	handler := slog.NewJSONHandler(f, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	})
+	logger := slog.New(handler)
+
+	return &Logger{
+		file:   f,
+		logger: logger,
+	}, nil
 }
 
-// Log writes a message to the file and to stdout.
-func (l *Logger) Log(format string, args ...interface{}) {
-	if l == nil || l.file == nil {
+// Info logs info level message.
+func (l *Logger) Info(msg string, args ...any) {
+	if l == nil || l.logger == nil {
 		return
 	}
-	msg := fmt.Sprintf("[%s] %s\n", time.Now().Format("2006-01-02 15:04:05.000"), fmt.Sprintf(format, args...))
-	_, _ = l.file.WriteString(msg)
-	fmt.Print(msg)
+	l.logger.Info(msg, args...)
+	fmt.Printf("[%s] INFO: %s\n", time.Now().Format("15:04:05.000"), formatMsg(msg, args...))
+}
+
+// Warn logs warn level message.
+func (l *Logger) Warn(msg string, args ...any) {
+	if l == nil || l.logger == nil {
+		return
+	}
+	l.logger.Warn(msg, args...)
+	fmt.Printf("[%s] WARN: %s\n", time.Now().Format("15:04:05.000"), formatMsg(msg, args...))
+}
+
+// Error logs error level message.
+func (l *Logger) Error(msg string, err error, args ...any) {
+	if l == nil || l.logger == nil {
+		return
+	}
+	fullArgs := append([]any{"error", err}, args...)
+	l.logger.Error(msg, fullArgs...)
+	fmt.Printf("[%s] ERROR: %s (error: %v)\n", time.Now().Format("15:04:05.000"), formatMsg(msg, args...), err)
+}
+
+// Debug logs debug level message.
+func (l *Logger) Debug(msg string, args ...any) {
+	if l == nil || l.logger == nil {
+		return
+	}
+	l.logger.Debug(msg, args...)
+}
+
+func formatMsg(msg string, args ...any) string {
+	if len(args) == 0 {
+		return msg
+	}
+	return fmt.Sprintf(msg, args...)
 }
 
 // Close closes the log file.
@@ -76,22 +125,22 @@ func (m *Monitor) Run() error {
 	m.logger = logger
 	defer m.logger.Close()
 
-	m.logger.Log("Netwinmon session started. Target: %s, Report: %s, Log: %s", m.TargetExe, m.ReportPath, m.LogPath)
-	m.logger.Log("Checking administrative status...")
+	m.logger.Info("Netwinmon session started. Target: %s, Report: %s, Log: %s", m.TargetExe, m.ReportPath, m.LogPath)
+	m.logger.Info("Checking administrative status...")
 	if windows.GetCurrentProcessToken().IsElevated() {
-		m.logger.Log("Running as Administrator.")
+		m.logger.Info("Running as Administrator.")
 	} else {
-		m.logger.Log("WARNING: Running without Administrator privileges. ETW engine will fail and fall back to polling.")
+		m.logger.Warn("Running without Administrator privileges. ETW engine will fail and fall back to polling.")
 	}
 
-	m.logger.Log("Scanning running processes to exclude existing instances...")
+	m.logger.Info("Scanning running processes to exclude existing instances...")
 	knownPIDs, err := m.findCurrentPIDs()
 	if err != nil {
 		return fmt.Errorf("failed listing current processes: %w", err)
 	}
-	m.logger.Log("Excluding %d already running instances.", len(knownPIDs))
+	m.logger.Info("Excluding %d already running instances.", len(knownPIDs))
 
-	m.logger.Log("Waiting for next instance of %s...", m.TargetExe)
+	m.logger.Info("Waiting for next instance of %s...", m.TargetExe)
 	var pid uint32
 	var path string
 	for {
@@ -112,7 +161,7 @@ func (m *Monitor) Run() error {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	m.logger.Log("Found next process instance. PID: %d, Path: %s", pid, path)
+	m.logger.Info("Found next process instance. PID: %d, Path: %s", pid, path)
 	return m.monitorPID(pid, path)
 }
 
@@ -173,7 +222,7 @@ func (m *Monitor) match(procPath string) bool {
 }
 
 func (m *Monitor) monitorPID(pid uint32, path string) error {
-	m.logger.Log("Opening handle to target PID %d...", pid)
+	m.logger.Info("Opening handle to target PID %d...", pid)
 	h, err := windows.OpenProcess(windows.SYNCHRONIZE|windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
 	if err != nil {
 		return fmt.Errorf("failed to open process handle: %w", err)
@@ -184,10 +233,10 @@ func (m *Monitor) monitorPID(pid uint32, path string) error {
 	var startTime time.Time
 	if err := windows.GetProcessTimes(h, &creationTime, &exitTime, &kernelTime, &userTime); err == nil {
 		startTime = filetimeToTime(creationTime)
-		m.logger.Log("Target process creation time (UTC): %s", startTime.UTC().Format(time.RFC3339))
+		m.logger.Info("Target process creation time (UTC): %s", startTime.UTC().Format(time.RFC3339))
 	} else {
 		startTime = time.Now()
-		m.logger.Log("Warning: failed to get process times: %v. Using current time.", err)
+		m.logger.Warn("Failed to get process times: %v. Using current time.", err)
 	}
 
 	// Aggregation maps.
@@ -198,18 +247,18 @@ func (m *Monitor) monitorPID(pid uint32, path string) error {
 	engineUsed := "polling"
 
 	// Try starting ETW session first.
-	m.logger.Log("Attempting to initialize ETW tracing engine...")
+	m.logger.Info("Attempting to initialize ETW tracing engine...")
 	etwEng = NewETWEngine(pid, tcpMap, udpMap, m.logger)
 	if err := etwEng.Start(); err == nil {
-		m.logger.Log("Successfully started ETW monitoring session: %s", etwEng.SessionName)
+		m.logger.Info("Successfully started ETW monitoring session: %s", etwEng.SessionName)
 		engineUsed = "etw"
 	} else {
-		m.logger.Log("Unable to start ETW trace session: %v.", err)
-		m.logger.Log("Falling back to IP Helper table polling engine...")
+		m.logger.Warn("Unable to start ETW trace session: %v.", err)
+		m.logger.Info("Falling back to IP Helper table polling engine...")
 		etwEng = nil
 	}
 
-	m.logger.Log("Monitoring network activity of PID %d... Press Ctrl+C to abort.", pid)
+	m.logger.Info("Monitoring network activity of PID %d... Press Ctrl+C to abort.", pid)
 
 	// Helper to snap tables (only used if falling back to polling engine).
 	snap := func() {
@@ -242,9 +291,9 @@ func (m *Monitor) monitorPID(pid uint32, path string) error {
 					}
 				}
 			}
-			m.logger.Log("Polling Snap: found %d total TCP connections. Matched %d to PID %d.", len(tConns), matchCount, pid)
+			m.logger.Debug("Polling Snap: found %d total TCP connections. Matched %d to PID %d.", len(tConns), matchCount, pid)
 		} else {
-			m.logger.Log("Polling Error: failed to get TCP connections: %v", err)
+			m.logger.Error("Polling Error: failed to get TCP connections", err)
 		}
 
 		// Snap UDP.
@@ -273,9 +322,9 @@ func (m *Monitor) monitorPID(pid uint32, path string) error {
 					}
 				}
 			}
-			m.logger.Log("Polling Snap: found %d total UDP endpoints. Matched %d to PID %d.", len(uEps), matchCount, pid)
+			m.logger.Debug("Polling Snap: found %d total UDP endpoints. Matched %d to PID %d.", len(uEps), matchCount, pid)
 		} else {
-			m.logger.Log("Polling Error: failed to get UDP endpoints: %v", err)
+			m.logger.Error("Polling Error: failed to get UDP endpoints", err)
 		}
 	}
 
@@ -285,7 +334,7 @@ func (m *Monitor) monitorPID(pid uint32, path string) error {
 
 		event, err := windows.WaitForSingleObject(h, 0)
 		if err == nil && event == windows.WAIT_OBJECT_0 {
-			m.logger.Log("Target process exit detected by WaitForSingleObject.")
+			m.logger.Info("Target process exit detected by WaitForSingleObject.")
 			break
 		}
 		time.Sleep(m.Interval)
@@ -296,20 +345,20 @@ func (m *Monitor) monitorPID(pid uint32, path string) error {
 
 	// Stop ETW trace session if it was started.
 	if etwEng != nil {
-		m.logger.Log("Stopping ETW tracing session...")
+		m.logger.Info("Stopping ETW tracing session...")
 		etwEng.Stop()
 	}
 
 	var endTime time.Time
 	if err := windows.GetProcessTimes(h, &creationTime, &exitTime, &kernelTime, &userTime); err == nil {
 		endTime = filetimeToTime(exitTime)
-		m.logger.Log("Target process exit time (UTC): %s", endTime.UTC().Format(time.RFC3339))
+		m.logger.Info("Target process exit time (UTC): %s", endTime.UTC().Format(time.RFC3339))
 	} else {
 		endTime = time.Now()
-		m.logger.Log("Warning: failed to get process exit times: %v. Using current time.", err)
+		m.logger.Warn("Failed to get process exit times: %v. Using current time.", err)
 	}
 
-	m.logger.Log("Process exited. Generating report...")
+	m.logger.Info("Process exited. Generating report...")
 
 	// Convert maps to slices under lock protection (just in case).
 	var tcpConns []TCPEndpointRecord
@@ -344,13 +393,20 @@ func (m *Monitor) monitorPID(pid uint32, path string) error {
 		return fmt.Errorf("failed to serialize report: %w", err)
 	}
 
-	m.logger.Log("Writing report to %s...", m.ReportPath)
+	// Ensure report parent directory exists
+	if dir := filepath.Dir(m.ReportPath); dir != "." {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			m.logger.Warn("Failed to create report directory %s: %v", dir, err)
+		}
+	}
+
+	m.logger.Info("Writing report to %s...", m.ReportPath)
 	err = os.WriteFile(m.ReportPath, reportBytes, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to write report.json: %w", err)
 	}
 
-	m.logger.Log("Report written successfully. Total TCP remote endpoints: %d, UDP remote endpoints: %d.", len(tcpConns), len(udpEps))
+	m.logger.Info("Report written successfully. Total TCP remote endpoints: %d, UDP remote endpoints: %d.", len(tcpConns), len(udpEps))
 	return nil
 }
 
