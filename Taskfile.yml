@@ -121,6 +121,7 @@ tasks:
       - task: test
       # - task: coverage
       # - task: test-integration
+      - task: build
       - echo all done
 
   # --- running stuff ---

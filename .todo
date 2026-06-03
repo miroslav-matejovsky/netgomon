@@ -1,3 +1,2 @@
 - Add Pester unit tests for scripts (Invoke-NetworkMonitorProcess.ps1, Invoke-NetworkEnforceProcess.ps1)
-- Support process-local filtering for firewall logs rather than system-wide logging
 - Implement automated log rotation or cleanup for the local logs directory

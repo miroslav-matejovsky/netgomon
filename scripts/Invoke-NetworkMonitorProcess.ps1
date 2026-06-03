@@ -180,12 +180,13 @@ function Get-ProcNetWrapPaths {
     $exeName = [System.IO.Path]::GetFileNameWithoutExtension($ExePath)
 
     return [pscustomobject]@{
-        Timestamp      = $timestamp
-        ExeName        = $exeName
-        RunLog         = Join-Path $LogRoot "$exeName-$timestamp-monitor-wrapper.log"
-        NetstatLog     = Join-Path $LogRoot "$exeName-$timestamp-monitor-netstat.log"
-        WfpCaptureBase = Join-Path $LogRoot "$exeName-$timestamp-monitor-wfp"
-        FirewallLog    = "$env:SystemRoot\System32\LogFiles\Firewall\pfirewall.log"
+        Timestamp           = $timestamp
+        ExeName             = $exeName
+        RunLog              = Join-Path $LogRoot "$exeName-$timestamp-monitor-wrapper.log"
+        NetstatLog          = Join-Path $LogRoot "$exeName-$timestamp-monitor-netstat.log"
+        WfpCaptureBase      = Join-Path $LogRoot "$exeName-$timestamp-monitor-wfp"
+        FirewallLog         = "$env:SystemRoot\System32\LogFiles\Firewall\pfirewall.log"
+        FirewallFilteredLog = Join-Path $LogRoot "$exeName-$timestamp-monitor-firewall.log"
     }
 }
 
@@ -218,11 +219,14 @@ function Configure-FirewallLogging {
         [bool]$LogBlocked
     )
 
+    $allowedStr = if ($LogAllowed) { "True" } else { "False" }
+    $blockedStr = if ($LogBlocked) { "True" } else { "False" }
+
     Write-RunLog "Configuring firewall profile logging"
     Set-NetFirewallProfile -Profile Domain, Private, Public `
         -LogFileName $FirewallLogPath `
-        -LogAllowed $LogAllowed `
-        -LogBlocked $LogBlocked
+        -LogAllowed $allowedStr `
+        -LogBlocked $blockedStr
 }
 
 function Start-WrappedProcess {
@@ -280,6 +284,115 @@ function Write-UdpSnapshot {
     cmd /c "netstat -ano -p udp" | Out-File -FilePath $OutputPath -Append -Encoding utf8
 }
 
+function Track-ProcessPorts {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int]$Pid,
+
+        [Parameter(Mandatory = $true)]
+        [System.Collections.IDictionary]$TrackedPorts
+    )
+
+    try {
+        $tcpConnections = Get-NetTCPConnection -OwningProcess $Pid -ErrorAction SilentlyContinue
+        if ($null -ne $tcpConnections) {
+            foreach ($conn in $tcpConnections) {
+                $TrackedPorts['TCP'].Add([int]$conn.LocalPort) | Out-Null
+            }
+        }
+
+        $udpEndpoints = Get-NetUDPEndpoint -OwningProcess $Pid -ErrorAction SilentlyContinue
+        if ($null -ne $udpEndpoints) {
+            foreach ($ep in $udpEndpoints) {
+                $TrackedPorts['UDP'].Add([int]$ep.LocalPort) | Out-Null
+            }
+        }
+    }
+    catch {
+        # Ignore errors tracking ports
+    }
+}
+
+function Filter-FirewallLog {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FirewallLogPath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$OutputPath,
+
+        [Parameter(Mandatory = $true)]
+        [int]$Pid,
+
+        [Parameter(Mandatory = $true)]
+        [System.Collections.IDictionary]$LocalPorts,
+
+        [Parameter(Mandatory = $true)]
+        [DateTime]$StartTime,
+
+        [Parameter(Mandatory = $true)]
+        [DateTime]$EndTime
+    )
+
+    if (-not (Test-Path -LiteralPath $FirewallLogPath)) {
+        Write-RunLog "Firewall log file not found at $FirewallLogPath, skipping filtering."
+        return
+    }
+
+    Write-RunLog "Filtering firewall log for PID=$Pid"
+
+    $bufferStart = $StartTime.AddSeconds(-15)
+    $bufferEnd = $EndTime.AddSeconds(15)
+
+    $filteredLines = [System.Collections.Generic.List[string]]::new()
+    $filteredLines.Add("# Filtered Firewall Log for PID=$Pid")
+    $filteredLines.Add("# Process lifetime: $($StartTime.ToString('s')) to $($EndTime.ToString('s'))")
+    $filteredLines.Add("# TCP Ports: $(($LocalPorts['TCP'] | Sort-Object) -join ',')")
+    $filteredLines.Add("# UDP Ports: $(($LocalPorts['UDP'] | Sort-Object) -join ',')")
+    $filteredLines.Add("")
+
+    $lines = Get-Content -LiteralPath $FirewallLogPath -ErrorAction SilentlyContinue
+    if ($null -eq $lines) {
+        return
+    }
+
+    foreach ($line in $lines) {
+        if ($line.StartsWith('#')) {
+            if ($line.StartsWith('#Fields:')) {
+                $filteredLines.Add($line)
+            }
+            continue
+        }
+
+        $parts = $line -split '\s+' | Where-Object { $_ }
+        if ($parts.Count -ge 8) {
+            $dateStr = $parts[0]
+            $timeStr = $parts[1]
+            $dt = $null
+            if ([DateTime]::TryParse("$dateStr $timeStr", [ref]$dt)) {
+                if ($dt -ge $bufferStart -and $dt -le $bufferEnd) {
+                    $proto = $parts[3].ToUpper()
+                    $srcPortStr = $parts[6]
+                    $dstPortStr = $parts[7]
+
+                    if ($proto -eq "TCP" -or $proto -eq "UDP") {
+                        $srcPort = 0
+                        $dstPort = 0
+                        if ([int]::TryParse($srcPortStr, [ref]$srcPort) -and [int]::TryParse($dstPortStr, [ref]$dstPort)) {
+                            if ($LocalPorts[$proto].Contains($srcPort) -or $LocalPorts[$proto].Contains($dstPort)) {
+                                $filteredLines.Add($line)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    $filteredLines | Out-File -FilePath $OutputPath -Encoding utf8
+    Write-RunLog "Exported filtered firewall log to $OutputPath"
+}
+
 # ----------------------------
 # Main
 # ----------------------------
@@ -313,6 +426,7 @@ Write-RunLog "ExePath=$ExePath"
 Write-RunLog "WorkingDirectory=$WorkingDirectory"
 Write-RunLog "Arguments=$Arguments"
 Write-RunLog "FirewallLog=$($paths.FirewallLog)"
+Write-RunLog "FirewallFilteredLog=$($paths.FirewallFilteredLog)"
 Write-RunLog "EnableWfpCapture=$EnableWfpCapture"
 Write-RunLog "EnableFirewallLogAllowed=$EnableFirewallLogAllowed"
 Write-RunLog "EnableFirewallLogBlocked=$EnableFirewallLogBlocked"
@@ -322,6 +436,12 @@ Write-RunLog "EnableAll=$EnableAll"
 Write-RunLog "SnapshotIntervalSeconds=$SnapshotIntervalSeconds"
 Write-RunLog "NoWindow=$NoWindow"
 Write-RunLog "PassThruExitCode=$PassThruExitCode"
+
+$trackedPorts = @{
+    TCP = [System.Collections.Generic.HashSet[int]]::new()
+    UDP = [System.Collections.Generic.HashSet[int]]::new()
+}
+$startTime = [DateTime]::Now
 
 $proc = $null
 
@@ -343,8 +463,10 @@ try {
         -NoWindow ([bool]$NoWindow)
 
     Write-RunLog "Started PID=$($proc.Id)"
+    Track-ProcessPorts -Pid $proc.Id -TrackedPorts $trackedPorts
 
     while (-not $proc.HasExited) {
+        Track-ProcessPorts -Pid $proc.Id -TrackedPorts $trackedPorts
         if ($EnableTcpSnapshots) {
             Write-TcpSnapshot -Pid $proc.Id -OutputPath $paths.NetstatLog
         }
@@ -359,6 +481,22 @@ try {
     Write-RunLog "Target process exited with code $($proc.ExitCode)"
 }
 finally {
+    $endTime = [DateTime]::Now
+    if ($null -ne $proc) {
+        try {
+            Filter-FirewallLog `
+                -FirewallLogPath $paths.FirewallLog `
+                -OutputPath $paths.FirewallFilteredLog `
+                -Pid $proc.Id `
+                -LocalPorts $trackedPorts `
+                -StartTime $startTime `
+                -EndTime $endTime
+        }
+        catch {
+            Write-RunLog "Failed filtering firewall log: $($_.Exception.Message)"
+        }
+    }
+
     if ($EnableWfpCapture) {
         try {
             Stop-WfpCapture
@@ -371,6 +509,9 @@ finally {
     Write-RunLog "ProcNetMonitor session finished"
     Write-RunLog "RunLog=$($paths.RunLog)"
     Write-RunLog "FirewallLog=$($paths.FirewallLog)"
+    if ($null -ne $proc -and (Test-Path -LiteralPath $paths.FirewallFilteredLog)) {
+        Write-RunLog "FirewallFilteredLog=$($paths.FirewallFilteredLog)"
+    }
 
     if ($EnableTcpSnapshots) {
         Write-RunLog "TcpSnapshotLog=$($paths.NetstatLog)"
