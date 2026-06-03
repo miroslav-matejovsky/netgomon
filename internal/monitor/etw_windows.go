@@ -56,6 +56,8 @@ func (e *ETWEngine) Start() error {
 		_ = e.session.Stop()
 		return fmt.Errorf("failed to parse provider: %w", err)
 	}
+	provider.MatchAnyKeyword = 0xFFFFFFFFFFFFFFFF
+	provider.EnableLevel = 5 // Verbose
 
 	if err := e.session.EnableProvider(provider); err != nil {
 		_ = e.session.Stop()
@@ -183,14 +185,14 @@ func parseEventNetworkTuple(e *etw.Event) (remoteIP string, remotePort uint16, l
 		localIP = parseIP(e.EventData["saddr"])
 		localPort = parsePort(e.EventData["sport"])
 		state = "CONNECT_FAIL"
-	case 26, 28: // UDP Recv
+	case 26, 28, 43: // UDP Recv
 		remoteIP = parseIP(e.EventData["saddr"])
 		remotePort = parsePort(e.EventData["sport"])
 		localIP = parseIP(e.EventData["daddr"])
 		localPort = parsePort(e.EventData["dport"])
 		isUDP = true
 		state = "RECEIVE"
-	case 27, 29: // UDP Send
+	case 27, 29, 42: // UDP Send
 		remoteIP = parseIP(e.EventData["daddr"])
 		remotePort = parsePort(e.EventData["dport"])
 		localIP = parseIP(e.EventData["saddr"])

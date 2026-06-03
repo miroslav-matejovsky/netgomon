@@ -1,0 +1,6 @@
+- add structured logs with slog
+- in output/README.md add instructions how to use jq to get errors
+- create folder for logs and report files from args, not it fails on
+PS C:\dev\personal\netwinmon> .\dist\netwinmon.exe .\dist\probe.exe output/report.json output/monitor.log
+Error: failed to create log file: open output/monitor.log: The system cannot find the path specified.
+if it doesn't exist.

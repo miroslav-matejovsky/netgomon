@@ -89,6 +89,22 @@ func TestParseEventNetworkTuple(t *testing.T) {
 	require.Equal(t, uint16(53), remotePort)
 	require.True(t, isUDP)
 	require.Equal(t, "SEND", state)
+
+	// Case 4: UDP Send (Event 42)
+	e.System.EventID = 42
+	remoteIP, remotePort, _, _, isUDP, state = parseEventNetworkTuple(e)
+	require.Equal(t, "8.8.8.8", remoteIP)
+	require.Equal(t, uint16(53), remotePort)
+	require.True(t, isUDP)
+	require.Equal(t, "SEND", state)
+
+	// Case 5: UDP Recv (Event 43)
+	e.System.EventID = 43
+	remoteIP, remotePort, _, _, isUDP, state = parseEventNetworkTuple(e)
+	require.Equal(t, "127.0.0.1", remoteIP)
+	require.Equal(t, uint16(12345), remotePort)
+	require.True(t, isUDP)
+	require.Equal(t, "RECEIVE", state)
 }
 
 func TestParseTCPV4Table(t *testing.T) {

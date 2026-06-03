@@ -1,0 +1,30 @@
+{
+  "pid": 14644,
+  "path": "C:\\dev\\personal\\netwinmon\\dist\\probe.exe",
+  "start_time": "2026-06-03T11:39:39Z",
+  "end_time": "2026-06-03T11:40:21Z",
+  "engine": "etw",
+  "tcp_connections": [
+    {
+      "remote_address": "172.66.147.243",
+      "remote_port": 80,
+      "first_seen": "2026-06-03T11:39:42Z",
+      "last_seen": "2026-06-03T11:40:19Z",
+      "count": 13,
+      "inferred_http": true,
+      "states": {
+        "DISCONNECT": 13
+      }
+    }
+  ],
+  "udp_endpoints": [
+    {
+      "remote_address": "8.8.8.8",
+      "remote_port": 53,
+      "first_seen": "2026-06-03T11:39:42Z",
+      "last_seen": "2026-06-03T11:40:19Z",
+      "count": 13,
+      "inferred_http": false
+    }
+  ]
+}
