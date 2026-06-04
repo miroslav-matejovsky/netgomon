@@ -34,13 +34,18 @@ type UDPEndpointRecord struct {
 	EventFrequency float64 `json:"event_frequency_per_min"`
 }
 
-// ProcessReport represents a single monitored process in the report.
-type ProcessReport struct {
-	PID            uint32              `json:"pid"`
-	Path           string              `json:"path"`
-	StartTime      string              `json:"start_time"`
+// ToolStats represents the collected endpoints by a specific tool.
+type ToolStats struct {
 	TCPConnections []TCPEndpointRecord `json:"tcp_connections"`
 	UDPEndpoints   []UDPEndpointRecord `json:"udp_endpoints"`
+}
+
+// ProcessReport represents a single monitored process in the report.
+type ProcessReport struct {
+	PID       uint32               `json:"pid"`
+	Path      string               `json:"path"`
+	StartTime string               `json:"start_time"`
+	Tools     map[string]ToolStats `json:"tools"`
 }
 
 // Report represents the final output JSON format (multi-process).

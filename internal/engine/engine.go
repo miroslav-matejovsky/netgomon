@@ -193,11 +193,23 @@ func mapToProcessReport(ps *monitor.ProcessState) *report.ProcessReport {
 		PID:       ps.PID,
 		Path:      ps.Path,
 		StartTime: ps.StartTime.UTC().Format(time.RFC3339),
+		Tools:     make(map[string]report.ToolStats),
 	}
 
-	tcpConns := make([]report.TCPEndpointRecord, 0, len(ps.TCP))
+	// Helper to get or create ToolStats
+	getToolStats := func(toolName string) report.ToolStats {
+		if ts, ok := pr.Tools[toolName]; ok {
+			return ts
+		}
+		return report.ToolStats{
+			TCPConnections: []report.TCPEndpointRecord{},
+			UDPEndpoints:   []report.UDPEndpointRecord{},
+		}
+	}
+
 	for _, rec := range ps.TCP {
-		tcpConns = append(tcpConns, report.TCPEndpointRecord{
+		ts := getToolStats(rec.Tool)
+		ts.TCPConnections = append(ts.TCPConnections, report.TCPEndpointRecord{
 			RemoteAddress:     rec.RemoteAddress,
 			RemotePort:        rec.RemotePort,
 			FirstSeen:         rec.FirstSeen,
@@ -209,12 +221,12 @@ func mapToProcessReport(ps *monitor.ProcessState) *report.ProcessReport {
 			FailedConnections: rec.FailedConnections,
 			EventFrequency:    report.CalcFrequency(rec.FirstSeen, rec.LastSeen, rec.Count),
 		})
+		pr.Tools[rec.Tool] = ts
 	}
-	pr.TCPConnections = tcpConns
 
-	udpEps := make([]report.UDPEndpointRecord, 0, len(ps.UDP))
 	for _, rec := range ps.UDP {
-		udpEps = append(udpEps, report.UDPEndpointRecord{
+		ts := getToolStats(rec.Tool)
+		ts.UDPEndpoints = append(ts.UDPEndpoints, report.UDPEndpointRecord{
 			RemoteAddress:  rec.RemoteAddress,
 			RemotePort:     rec.RemotePort,
 			FirstSeen:      rec.FirstSeen,
@@ -224,8 +236,8 @@ func mapToProcessReport(ps *monitor.ProcessState) *report.ProcessReport {
 			Tool:           rec.Tool,
 			EventFrequency: report.CalcFrequency(rec.FirstSeen, rec.LastSeen, rec.Count),
 		})
+		pr.Tools[rec.Tool] = ts
 	}
-	pr.UDPEndpoints = udpEps
 
 	return &pr
 }

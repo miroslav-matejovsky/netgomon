@@ -46,30 +46,28 @@ func (m *Monitor) Run(ctx context.Context) error {
 		}
 		m.logger.Info("Using injected mock engines for testing", "pid", m.PID)
 	} else {
-		// Try goetw first (primary), fall back to rawsec if it fails.
+		// Run goetw and rawsec in parallel.
 		goetwEng := goetw.New(ctx, m.PID, m.logger)
 		if err := goetwEng.Start(); err == nil {
 			engines = append(engines, goetwEng)
 			engineNames = append(engineNames, "goetw")
 			m.logger.Info("goetw ETW engine started", "pid", m.PID)
 		} else {
-			m.logger.Warn("goetw ETW engine failed, trying rawsec...", "pid", m.PID, "error", err)
-			rawsecEng := rawsec.New(ctx, m.PID, m.logger)
-			if err := rawsecEng.Start(); err == nil {
-				engines = append(engines, rawsecEng)
-				engineNames = append(engineNames, "rawsec")
-				m.logger.Info("rawsec ETW engine started", "pid", m.PID)
-			} else {
-				m.logger.Warn("rawsec ETW engine failed", "pid", m.PID, "error", err)
-			}
+			m.logger.Warn("goetw ETW engine failed", "pid", m.PID, "error", err)
+		}
+
+		rawsecEng := rawsec.New(ctx, m.PID, m.logger)
+		if err := rawsecEng.Start(); err == nil {
+			engines = append(engines, rawsecEng)
+			engineNames = append(engineNames, "rawsec")
+			m.logger.Info("rawsec ETW engine started", "pid", m.PID)
+		} else {
+			m.logger.Warn("rawsec ETW engine failed", "pid", m.PID, "error", err)
 		}
 	}
 
-	if len(engines) == 0 {
-		usePolling = true
-		engineNames = append(engineNames, "polling")
-		m.logger.Info("No ETW engines, using polling fallback", "pid", m.PID)
-	}
+	usePolling = true
+	engineNames = append(engineNames, "polling")
 
 	// Fan-in from engine channels.
 	var fanWg sync.WaitGroup
