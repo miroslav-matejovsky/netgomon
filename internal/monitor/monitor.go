@@ -13,6 +13,7 @@ import (
 	"time"
 
 	etwapi "github.com/miroslav-matejovsky/netwinmon/internal/etw"
+	"github.com/miroslav-matejovsky/netwinmon/internal/pid"
 )
 
 // Monitor monitors target executables' network activity.
@@ -144,7 +145,7 @@ func (m *Monitor) Run(ctx context.Context) error {
 	var knownPIDs map[uint32]string
 	if m.NewOnly {
 		m.logger.Info("NewOnly mode: scanning running processes to exclude existing instances...")
-		knownPIDs, err = m.findCurrentPIDs()
+		knownPIDs, err = pid.FindMatching(m.TargetExes)
 		if err != nil {
 			return fmt.Errorf("failed listing current processes: %w", err)
 		}
@@ -194,7 +195,7 @@ func (m *Monitor) Run(ctx context.Context) error {
 		default:
 		}
 
-		current, err := m.findCurrentPIDs()
+		current, err := pid.FindMatching(m.TargetExes)
 		if err != nil {
 			m.logger.Warn("Failed to scan processes", "error", err)
 		} else {

@@ -1,6 +1,6 @@
 //go:build windows
 
-package monitor
+package pid
 
 import (
 	"path/filepath"
@@ -10,7 +10,9 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func (m *Monitor) findCurrentPIDs() (map[uint32]string, error) {
+// FindMatching returns a map of process IDs to executable paths for all
+// currently running processes that match any of the target executable names.
+func FindMatching(targetExes []string) (map[uint32]string, error) {
 	pids := make(map[uint32]string)
 	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
 	if err != nil {
@@ -34,7 +36,7 @@ func (m *Monitor) findCurrentPIDs() (map[uint32]string, error) {
 			_ = windows.CloseHandle(pHandle)
 			if err == nil {
 				procPath := windows.UTF16ToString(buf[:size])
-				if m.matchAny(procPath) {
+				if MatchAny(targetExes, procPath) {
 					pids[entry.ProcessID] = procPath
 				}
 			}
@@ -47,16 +49,18 @@ func (m *Monitor) findCurrentPIDs() (map[uint32]string, error) {
 	return pids, nil
 }
 
-func (m *Monitor) matchAny(procPath string) bool {
-	for _, target := range m.TargetExes {
-		if matchTarget(target, procPath) {
+// MatchAny returns true if the process path matches any of the given targets.
+func MatchAny(targetExes []string, procPath string) bool {
+	for _, target := range targetExes {
+		if MatchTarget(target, procPath) {
 			return true
 		}
 	}
 	return false
 }
 
-func matchTarget(target, procPath string) bool {
+// MatchTarget checks if a process path matches a single target executable name.
+func MatchTarget(target, procPath string) bool {
 	absTarget, err := filepath.Abs(target)
 	if err == nil {
 		absTarget = filepath.Clean(absTarget)
