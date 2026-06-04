@@ -1,24 +1,15 @@
-{"time":"2026-06-03T14:20:22.7522778+02:00","level":"INFO","msg":"Netwinmon session started. Target: C:\\dev\\personal\\netwinmon\\dist\\probe.exe, Report: output/report.json, Log: output/monitor.log"}
-{"time":"2026-06-03T14:20:22.7528391+02:00","level":"INFO","msg":"Checking administrative status..."}
-{"time":"2026-06-03T14:20:22.7544799+02:00","level":"INFO","msg":"Running as Administrator."}
-{"time":"2026-06-03T14:20:22.7544799+02:00","level":"INFO","msg":"Scanning running processes to exclude existing instances..."}
-{"time":"2026-06-03T14:20:22.7883341+02:00","level":"INFO","msg":"Excluding 0 already running instances."}
-{"time":"2026-06-03T14:20:22.7883341+02:00","level":"INFO","msg":"Waiting for next instance of C:\\dev\\personal\\netwinmon\\dist\\probe.exe..."}
-{"time":"2026-06-03T14:20:34.5043552+02:00","level":"INFO","msg":"Found next process instance. PID: 24552, Path: C:\\dev\\personal\\netwinmon\\dist\\probe.exe"}
-{"time":"2026-06-03T14:20:34.5043552+02:00","level":"INFO","msg":"Opening handle to target PID 24552..."}
-{"time":"2026-06-03T14:20:34.5064897+02:00","level":"INFO","msg":"Target process creation time (UTC): 2026-06-03T12:20:34Z"}
-{"time":"2026-06-03T14:20:34.5064897+02:00","level":"INFO","msg":"Attempting to initialize ETW tracing engine..."}
-{"time":"2026-06-03T14:20:34.7081188+02:00","level":"INFO","msg":"Successfully started ETW monitoring session: NetWinMon_24552_1780489234"}
-{"time":"2026-06-03T14:20:34.709291+02:00","level":"INFO","msg":"Monitoring network activity of PID 24552... Press Ctrl+C to abort."}
-{"time":"2026-06-03T14:20:39.9407577+02:00","level":"DEBUG","msg":"ETW Event: EventID=13 ProcessID=24552 Remote=172.66.147.243:80 Local=192.168.0.103:59408 IsUDP=false State=DISCONNECT"}
-{"time":"2026-06-03T14:20:39.9415221+02:00","level":"DEBUG","msg":"ETW Event: EventID=42 ProcessID=24552 Remote=8.8.8.8:53 Local=192.168.0.103:58734 IsUDP=true State=SEND"}
-{"time":"2026-06-03T14:20:42.465305+02:00","level":"DEBUG","msg":"ETW Event: EventID=13 ProcessID=24552 Remote=172.66.147.243:80 Local=192.168.0.103:59410 IsUDP=false State=DISCONNECT"}
-{"time":"2026-06-03T14:20:42.465305+02:00","level":"DEBUG","msg":"ETW Event: EventID=42 ProcessID=24552 Remote=8.8.8.8:53 Local=192.168.0.103:50596 IsUDP=true State=SEND"}
-{"time":"2026-06-03T14:20:46.2528911+02:00","level":"DEBUG","msg":"ETW Event: EventID=13 ProcessID=24552 Remote=172.66.147.243:80 Local=192.168.0.103:59413 IsUDP=false State=DISCONNECT"}
-{"time":"2026-06-03T14:20:46.2528911+02:00","level":"DEBUG","msg":"ETW Event: EventID=42 ProcessID=24552 Remote=8.8.8.8:53 Local=192.168.0.103:62450 IsUDP=true State=SEND"}
-{"time":"2026-06-03T14:20:48.7819387+02:00","level":"DEBUG","msg":"ETW Event: EventID=13 ProcessID=24552 Remote=172.66.147.243:80 Local=192.168.0.103:59415 IsUDP=false State=DISCONNECT"}
-{"time":"2026-06-03T14:20:48.7829507+02:00","level":"DEBUG","msg":"ETW Event: EventID=42 ProcessID=24552 Remote=8.8.8.8:53 Local=192.168.0.103:62963 IsUDP=true State=SEND"}
-{"time":"2026-06-03T14:20:51.3073352+02:00","level":"DEBUG","msg":"ETW Event: EventID=13 ProcessID=24552 Remote=172.66.147.243:80 Local=192.168.0.103:59417 IsUDP=false State=DISCONNECT"}
-{"time":"2026-06-03T14:20:51.3073352+02:00","level":"DEBUG","msg":"ETW Event: EventID=42 ProcessID=24552 Remote=8.8.8.8:53 Local=192.168.0.103:57768 IsUDP=true State=SEND"}
-{"time":"2026-06-03T14:20:55.0996077+02:00","level":"DEBUG","msg":"ETW Event: EventID=13 ProcessID=24552 Remote=172.66.147.243:80 Local=192.168.0.103:59419 IsUDP=false State=DISCONNECT"}
-{"time":"2026-06-03T14:20:55.1001244+02:00","level":"DEBUG","msg":"ETW Event: EventID=42 ProcessID=24552 Remote=8.8.8.8:53 Local=192.168.0.103:53302 IsUDP=true State=SEND"}
+{"time":"2026-06-04T06:06:24.7921041+02:00","level":"INFO","msg":"Netwinmon session started. Target: C:\\dev\\personal\\netwinmon\\dist\\probe.exe, Report: output/report.json, Log: output/monitor.log"}
+{"time":"2026-06-04T06:06:24.7921041+02:00","level":"INFO","msg":"Checking administrative status..."}
+{"time":"2026-06-04T06:06:24.7931396+02:00","level":"INFO","msg":"Running as Administrator."}
+{"time":"2026-06-04T06:06:24.7931396+02:00","level":"INFO","msg":"Scanning running processes to exclude existing instances..."}
+{"time":"2026-06-04T06:06:24.8424149+02:00","level":"INFO","msg":"Excluding 0 already running instances."}
+{"time":"2026-06-04T06:06:24.8424149+02:00","level":"INFO","msg":"Waiting for next instance of C:\\dev\\personal\\netwinmon\\dist\\probe.exe..."}
+{"time":"2026-06-04T06:06:38.4176871+02:00","level":"INFO","msg":"Found next process instance. PID: 35900, Path: C:\\dev\\personal\\netwinmon\\dist\\probe.exe"}
+{"time":"2026-06-04T06:06:38.4176871+02:00","level":"INFO","msg":"Opening handle to target PID 35900..."}
+{"time":"2026-06-04T06:06:38.4228098+02:00","level":"INFO","msg":"Target process creation time (UTC): 2026-06-04T04:06:38Z"}
+{"time":"2026-06-04T06:06:38.4228098+02:00","level":"INFO","msg":"Attempting to initialize ETW tracing engines..."}
+{"time":"2026-06-04T06:06:38.6656331+02:00","level":"INFO","msg":"rawsec: ETW session started","pid":35900}
+{"time":"2026-06-04T06:06:38.6656331+02:00","level":"INFO","msg":"rawsec ETW engine started successfully"}
+{"time":"2026-06-04T06:06:38.8501615+02:00","level":"INFO","msg":"goetw: ETW session started","pid":35900}
+{"time":"2026-06-04T06:06:38.8507079+02:00","level":"INFO","msg":"goetw ETW engine started successfully"}
+{"time":"2026-06-04T06:06:38.8528857+02:00","level":"INFO","msg":"Monitoring network activity of PID 35900... Press Ctrl+C to abort."}

@@ -68,6 +68,7 @@
     "covermode",
     "coverprofile",
     "deadcode",
+    "etwapi",
     "fe3dback",
     "filetime",
     "goetw",
