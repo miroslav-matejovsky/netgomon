@@ -1,9 +1,7 @@
 - Implement ETW PID filter descriptor (EVENT_FILTER_TYPE_PID) - requires investigating if goetw/rawsec expose ENABLE_TRACE_PARAMETERS. Would reduce CPU overhead on busy machines by filtering events at kernel level instead of userspace.
 - Flag-based CLI (--target, --report, --log, --new-only) to replace positional args. Currently still uses positional args.
 - Verify ETW event capture with admin privileges - run probe.exe with admin and check monitor.log for PID field names, event data types, and whether connections appear.
-- Step 3 from old plan.md (HTTP API) is implemented but could add more endpoints (e.g. GET /processes listing all targets, POST /target to add new target at runtime).
 - Consider adding connection duration tracking (time between CONNECT and DISCONNECT events for same endpoint).
 - Consider adding DNS resolution correlation - match UDP port 53 traffic with subsequent TCP connections.
-- The coverage.ps1 script references ./todo/... which is wrong - fix to use ./... or remove if not needed.
-- Consider structured logging (slog) throughout instead of custom Logger type wrapping both slog and fmt.Printf.
 - Add integration tests that start probe.exe and verify report.json content (requires separate test runner).
+- Verify that context cancellation correctly shuts down ETW engines (goetw, rawsec) without resource leaks, now that context is passed from the main application.

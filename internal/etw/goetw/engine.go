@@ -44,8 +44,8 @@ type Engine struct {
 }
 
 // New creates a goetw ETW engine for the given target PID.
-func New(targetPID uint32, logger *slog.Logger) *Engine {
-	ctx, cancel := context.WithCancel(context.Background())
+func New(ctx context.Context, targetPID uint32, logger *slog.Logger) *Engine {
+	ctx, cancel := context.WithCancel(ctx)
 	return &Engine{
 		targetPID: targetPID,
 		events:    make(chan etwapi.NetworkEvent, 256),

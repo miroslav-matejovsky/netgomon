@@ -7,7 +7,7 @@ $coverProfile = "coverage.out"
 
 # Define folders/packages here
 $testTargets = @(
-    "./todo/..."
+    "./internal/..."
 )
 
 go test -count=1 -tags=integration "-coverprofile=$coverProfile" -covermode=atomic @testTargets 2>&1 | Out-Null

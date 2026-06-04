@@ -435,14 +435,14 @@ func (m *Monitor) monitorPID(ctx context.Context, pid uint32, path string, slogL
 		m.logger.Info("PID %d: Using injected mock engines for testing", pid)
 	} else {
 		// Try goetw first (primary), fall back to rawsec if it fails.
-		goetwEng := goetw.New(pid, slogLogger)
+		goetwEng := goetw.New(ctx, pid, slogLogger)
 		if err := goetwEng.Start(); err == nil {
 			engines = append(engines, goetwEng)
 			engineNames = append(engineNames, "goetw")
 			m.logger.Info("PID %d: goetw ETW engine started", pid)
 		} else {
 			m.logger.Warn("PID %d: goetw ETW engine failed: %v. Trying rawsec...", pid, err)
-			rawsecEng := rawsec.New(pid, slogLogger)
+			rawsecEng := rawsec.New(ctx, pid, slogLogger)
 			if err := rawsecEng.Start(); err == nil {
 				engines = append(engines, rawsecEng)
 				engineNames = append(engineNames, "rawsec")
