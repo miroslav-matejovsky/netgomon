@@ -10,22 +10,22 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/miroslav-matejovsky/netwinmon/internal/monitor"
+	"github.com/miroslav-matejovsky/netwinmon/internal/engine"
 )
 
 // Server represents the HTTP API server.
 type Server struct {
-	addr    string
-	monitor *monitor.Monitor
-	srv     *http.Server
-	mu      sync.Mutex
+	addr   string
+	engine *engine.Engine
+	srv    *http.Server
+	mu     sync.Mutex
 }
 
 // NewServer creates a new API server.
-func NewServer(addr string, mon *monitor.Monitor) *Server {
+func NewServer(addr string, eng *engine.Engine) *Server {
 	return &Server{
-		addr:    addr,
-		monitor: mon,
+		addr:   addr,
+		engine: eng,
 	}
 }
 
@@ -68,7 +68,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	state := s.monitor.GetState()
+	state := s.engine.GetReport()
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(state); err != nil {
@@ -89,7 +89,7 @@ func (s *Server) handleStatePID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	state := s.monitor.GetProcessState(uint32(pid))
+	state := s.engine.GetProcessReport(uint32(pid))
 	if state == nil {
 		http.Error(w, "Process not found", http.StatusNotFound)
 		return

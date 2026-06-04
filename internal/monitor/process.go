@@ -5,7 +5,6 @@ package monitor
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"sync"
 	"time"
 
@@ -16,44 +15,23 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func (m *Monitor) monitorPID(ctx context.Context, pid uint32, path string, slogLogger *slog.Logger) {
-	m.logger.Info("Opening handle to target", "pid", pid)
-	h, err := windows.OpenProcess(windows.SYNCHRONIZE|windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+func (m *Monitor) Run(ctx context.Context) error {
+	m.logger.Info("Opening handle to target", "pid", m.PID)
+	h, err := windows.OpenProcess(windows.SYNCHRONIZE|windows.PROCESS_QUERY_LIMITED_INFORMATION, false, m.PID)
 	if err != nil {
-		m.logger.Warn("Failed to open process handle", "pid", pid, "error", err)
-		return
+		m.logger.Warn("Failed to open process handle", "pid", m.PID, "error", err)
+		return err
 	}
 	defer func() { _ = windows.CloseHandle(h) }()
 
 	var creationTime, exitTime, kernelTime, userTime windows.Filetime
-	var startTime time.Time
 	if err := windows.GetProcessTimes(h, &creationTime, &exitTime, &kernelTime, &userTime); err == nil {
-		startTime = filetimeToTime(creationTime)
-		m.logger.Info("Process creation time", "pid", pid, "time", startTime.UTC().Format(time.RFC3339))
+		m.state.StartTime = filetimeToTime(creationTime)
+		m.logger.Info("Process creation time", "pid", m.PID, "time", m.state.StartTime.UTC().Format(time.RFC3339))
 	} else {
-		startTime = time.Now()
-		m.logger.Warn("Failed to get process times, using current time", "pid", pid, "error", err)
+		m.state.StartTime = time.Now()
+		m.logger.Warn("Failed to get process times, using current time", "pid", m.PID, "error", err)
 	}
-
-	// Per-process aggregation maps.
-	tcpMap := make(map[string]*TCPEndpoint)
-	udpMap := make(map[string]*UDPEndpoint)
-
-	m.mu.Lock()
-	m.activeProcesses[pid] = &ProcessState{
-		PID:       pid,
-		Path:      path,
-		StartTime: startTime,
-		TCP:       tcpMap,
-		UDP:       udpMap,
-	}
-	m.mu.Unlock()
-
-	defer func() {
-		m.mu.Lock()
-		delete(m.activeProcesses, pid)
-		m.mu.Unlock()
-	}()
 
 	// Start ETW engine for this PID (or use injected mock).
 	var engines []etwapi.Engine
@@ -66,23 +44,23 @@ func (m *Monitor) monitorPID(ctx context.Context, pid uint32, path string, slogL
 			_ = eng.Start()
 			engineNames = append(engineNames, "mock")
 		}
-		m.logger.Info("Using injected mock engines for testing", "pid", pid)
+		m.logger.Info("Using injected mock engines for testing", "pid", m.PID)
 	} else {
 		// Try goetw first (primary), fall back to rawsec if it fails.
-		goetwEng := goetw.New(ctx, pid, slogLogger)
+		goetwEng := goetw.New(ctx, m.PID, m.logger)
 		if err := goetwEng.Start(); err == nil {
 			engines = append(engines, goetwEng)
 			engineNames = append(engineNames, "goetw")
-			m.logger.Info("goetw ETW engine started", "pid", pid)
+			m.logger.Info("goetw ETW engine started", "pid", m.PID)
 		} else {
-			m.logger.Warn("goetw ETW engine failed, trying rawsec...", "pid", pid, "error", err)
-			rawsecEng := rawsec.New(ctx, pid, slogLogger)
+			m.logger.Warn("goetw ETW engine failed, trying rawsec...", "pid", m.PID, "error", err)
+			rawsecEng := rawsec.New(ctx, m.PID, m.logger)
 			if err := rawsecEng.Start(); err == nil {
 				engines = append(engines, rawsecEng)
 				engineNames = append(engineNames, "rawsec")
-				m.logger.Info("rawsec ETW engine started", "pid", pid)
+				m.logger.Info("rawsec ETW engine started", "pid", m.PID)
 			} else {
-				m.logger.Warn("rawsec ETW engine failed", "pid", pid, "error", err)
+				m.logger.Warn("rawsec ETW engine failed", "pid", m.PID, "error", err)
 			}
 		}
 	}
@@ -90,7 +68,7 @@ func (m *Monitor) monitorPID(ctx context.Context, pid uint32, path string, slogL
 	if len(engines) == 0 {
 		usePolling = true
 		engineNames = append(engineNames, "polling")
-		m.logger.Info("No ETW engines, using polling fallback", "pid", pid)
+		m.logger.Info("No ETW engines, using polling fallback", "pid", m.PID)
 	}
 
 	// Fan-in from engine channels.
@@ -100,12 +78,12 @@ func (m *Monitor) monitorPID(ctx context.Context, pid uint32, path string, slogL
 		go func(ch <-chan etwapi.NetworkEvent) {
 			defer fanWg.Done()
 			for ev := range ch {
-				m.handleNetworkEvent(ev, tcpMap, udpMap)
+				m.handleNetworkEvent(ev)
 			}
 		}(eng.Events())
 	}
 
-	m.logger.Info("Monitoring network activity", "pid", pid, "engines", engineNames)
+	m.logger.Info("Monitoring network activity", "pid", m.PID, "engines", engineNames)
 
 	// Polling snap helper.
 	snap := func() {
@@ -117,16 +95,16 @@ func (m *Monitor) monitorPID(ctx context.Context, pid uint32, path string, slogL
 		if tConns, err := iphelper.GetTCPConnections(); err == nil {
 			matchCount := 0
 			for _, conn := range tConns {
-				if conn.PID == pid {
+				if conn.PID == m.PID {
 					matchCount++
 					key := fmt.Sprintf("polling:%s:%d", conn.RemoteIP, conn.RemotePort)
 					m.mu.Lock()
-					if rec, ok := tcpMap[key]; ok {
+					if rec, ok := m.state.TCP[key]; ok {
 						rec.LastSeen = nowStr
 						rec.Count++
 						rec.States[conn.State]++
 					} else {
-						tcpMap[key] = &TCPEndpoint{
+						m.state.TCP[key] = &TCPEndpoint{
 							RemoteAddress: conn.RemoteIP.String(),
 							RemotePort:    conn.RemotePort,
 							FirstSeen:     nowStr,
@@ -140,15 +118,15 @@ func (m *Monitor) monitorPID(ctx context.Context, pid uint32, path string, slogL
 					m.mu.Unlock()
 				}
 			}
-			m.logger.Debug("Polling TCP", "pid", pid, "total", len(tConns), "matched", matchCount)
+			m.logger.Debug("Polling TCP", "pid", m.PID, "total", len(tConns), "matched", matchCount)
 		} else {
-			m.logger.Error("Polling TCP error", "pid", pid, "error", err)
+			m.logger.Error("Polling TCP error", "pid", m.PID, "error", err)
 		}
 
 		if uEps, err := iphelper.GetUDPEndpoints(); err == nil {
 			matchCount := 0
 			for _, ep := range uEps {
-				if ep.PID == pid {
+				if ep.PID == m.PID {
 					matchCount++
 					remoteIP := "0.0.0.0"
 					if ep.LocalIP.To4() == nil {
@@ -156,11 +134,11 @@ func (m *Monitor) monitorPID(ctx context.Context, pid uint32, path string, slogL
 					}
 					key := fmt.Sprintf("polling:%s:0", remoteIP)
 					m.mu.Lock()
-					if rec, ok := udpMap[key]; ok {
+					if rec, ok := m.state.UDP[key]; ok {
 						rec.LastSeen = nowStr
 						rec.Count++
 					} else {
-						udpMap[key] = &UDPEndpoint{
+						m.state.UDP[key] = &UDPEndpoint{
 							RemoteAddress: remoteIP,
 							RemotePort:    0,
 							FirstSeen:     nowStr,
@@ -173,9 +151,9 @@ func (m *Monitor) monitorPID(ctx context.Context, pid uint32, path string, slogL
 					m.mu.Unlock()
 				}
 			}
-			m.logger.Debug("Polling UDP", "pid", pid, "total", len(uEps), "matched", matchCount)
+			m.logger.Debug("Polling UDP", "pid", m.PID, "total", len(uEps), "matched", matchCount)
 		} else {
-			m.logger.Error("Polling UDP error", "pid", pid, "error", err)
+			m.logger.Error("Polling UDP error", "pid", m.PID, "error", err)
 		}
 	}
 
@@ -183,7 +161,7 @@ func (m *Monitor) monitorPID(ctx context.Context, pid uint32, path string, slogL
 	for {
 		select {
 		case <-ctx.Done():
-			m.logger.Info("Monitor cancelled", "pid", pid)
+			m.logger.Info("Monitor cancelled", "pid", m.PID)
 			goto done
 		default:
 		}
@@ -192,13 +170,13 @@ func (m *Monitor) monitorPID(ctx context.Context, pid uint32, path string, slogL
 
 		event, err := windows.WaitForSingleObject(h, 0)
 		if err == nil && event == windows.WAIT_OBJECT_0 {
-			m.logger.Info("Process exit detected", "pid", pid)
+			m.logger.Info("Process exit detected", "pid", m.PID)
 			break
 		}
 
 		select {
 		case <-ctx.Done():
-			m.logger.Info("Monitor cancelled", "pid", pid)
+			m.logger.Info("Monitor cancelled", "pid", m.PID)
 			goto done
 		case <-time.After(m.Interval):
 		}
@@ -217,10 +195,11 @@ done:
 	fanWg.Wait()
 
 	m.mu.RLock()
-	tcpCount := len(tcpMap)
-	udpCount := len(udpMap)
+	tcpCount := len(m.state.TCP)
+	udpCount := len(m.state.UDP)
 	m.mu.RUnlock()
-	m.logger.Info("Monitoring complete", "pid", pid, "tcp", tcpCount, "udp", udpCount)
+	m.logger.Info("Monitoring complete", "pid", m.PID, "tcp", tcpCount, "udp", udpCount)
+	return nil
 }
 
 func filetimeToTime(ft windows.Filetime) time.Time {

@@ -9,13 +9,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miroslav-matejovsky/netwinmon/internal/monitor"
+	"github.com/miroslav-matejovsky/netwinmon/internal/engine"
+	"github.com/miroslav-matejovsky/netwinmon/internal/report"
 	"github.com/stretchr/testify/require"
 )
 
 func TestAPIState(t *testing.T) {
 	// Setup monitor with empty engines so it doesn't try to use ETW.
-	m := monitor.NewMonitor([]string{"dummy.exe"}, "dummy_report.json", "dummy.log", 100*time.Millisecond)
+	m := engine.NewEngine([]string{"dummy.exe"}, "dummy_report.json", "dummy.log", 100*time.Millisecond, false)
 
 	// We can't easily populate monitor's internal activeProcesses map from outside
 	// without starting a run loop or mocking it, but we can verify the endpoint
@@ -36,15 +37,15 @@ func TestAPIState(t *testing.T) {
 	body, err := io.ReadAll(res.Body)
 	require.NoError(t, err)
 
-	var state map[uint32]*monitor.ProcessState
+	var state report.Report
 	err = json.Unmarshal(body, &state)
 	require.NoError(t, err)
 	require.NotNil(t, state)
-	require.Empty(t, state)
+	require.Empty(t, state.Processes)
 }
 
 func TestAPIStatePID(t *testing.T) {
-	m := monitor.NewMonitor([]string{"dummy.exe"}, "dummy_report.json", "dummy.log", 100*time.Millisecond)
+	m := engine.NewEngine([]string{"dummy.exe"}, "dummy_report.json", "dummy.log", 100*time.Millisecond, false)
 	srv := NewServer(":0", m)
 
 	// Non-existent PID returns 404.
@@ -67,7 +68,7 @@ func TestAPIStatePID(t *testing.T) {
 }
 
 func TestAPIStartStop(t *testing.T) {
-	m := monitor.NewMonitor([]string{"dummy.exe"}, "dummy_report.json", "dummy.log", 100*time.Millisecond)
+	m := engine.NewEngine([]string{"dummy.exe"}, "dummy_report.json", "dummy.log", 100*time.Millisecond, false)
 	srv := NewServer("127.0.0.1:0", m)
 
 	err := srv.Start()

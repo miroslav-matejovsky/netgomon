@@ -10,7 +10,7 @@ import (
 )
 
 // handleNetworkEvent aggregates a single ETW network event into the maps.
-func (m *Monitor) handleNetworkEvent(ev etwapi.NetworkEvent, tcpMap map[string]*TCPEndpoint, udpMap map[string]*UDPEndpoint) {
+func (m *Monitor) handleNetworkEvent(ev etwapi.NetworkEvent) {
 	nowStr := ev.Timestamp.UTC().Format(time.RFC3339)
 	key := fmt.Sprintf("%s:%s:%d", ev.Tool, ev.RemoteIP, ev.RemotePort)
 
@@ -18,11 +18,11 @@ func (m *Monitor) handleNetworkEvent(ev etwapi.NetworkEvent, tcpMap map[string]*
 	defer m.mu.Unlock()
 
 	if ev.IsUDP {
-		if rec, ok := udpMap[key]; ok {
+		if rec, ok := m.state.UDP[key]; ok {
 			rec.LastSeen = nowStr
 			rec.Count++
 		} else {
-			udpMap[key] = &UDPEndpoint{
+			m.state.UDP[key] = &UDPEndpoint{
 				RemoteAddress: ev.RemoteIP,
 				RemotePort:    ev.RemotePort,
 				FirstSeen:     nowStr,
@@ -33,7 +33,7 @@ func (m *Monitor) handleNetworkEvent(ev etwapi.NetworkEvent, tcpMap map[string]*
 			}
 		}
 	} else {
-		if rec, ok := tcpMap[key]; ok {
+		if rec, ok := m.state.TCP[key]; ok {
 			rec.LastSeen = nowStr
 			rec.Count++
 			rec.States[ev.State]++
@@ -45,7 +45,7 @@ func (m *Monitor) handleNetworkEvent(ev etwapi.NetworkEvent, tcpMap map[string]*
 			if ev.State == "CONNECT_FAIL" {
 				failed = 1
 			}
-			tcpMap[key] = &TCPEndpoint{
+			m.state.TCP[key] = &TCPEndpoint{
 				RemoteAddress:     ev.RemoteIP,
 				RemotePort:        ev.RemotePort,
 				FirstSeen:         nowStr,

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/miroslav-matejovsky/netwinmon/internal/api"
-	"github.com/miroslav-matejovsky/netwinmon/internal/monitor"
+	"github.com/miroslav-matejovsky/netwinmon/internal/engine"
 )
 
 // Run parses arguments and starts the monitor.
@@ -45,9 +45,9 @@ func Run(ctx context.Context) error {
 		target = absPath
 	}
 
-	m := monitor.NewMonitor([]string{target}, reportPath, logPath, 100*time.Millisecond)
+	eng := engine.NewEngine([]string{target}, reportPath, logPath, 100*time.Millisecond, false)
 
-	apiSrv := api.NewServer("127.0.0.1:8080", m)
+	apiSrv := api.NewServer("127.0.0.1:8080", eng)
 	if err := apiSrv.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to start API server: %v\n", err)
 	}
@@ -57,7 +57,7 @@ func Run(ctx context.Context) error {
 		_ = apiSrv.Stop(stopCtx)
 	}()
 
-	return m.Run(ctx)
+	return eng.Run(ctx)
 }
 
 func printUsage() {
