@@ -14,6 +14,7 @@
 - Before completing a task, run `task all` to ensure all tests pass and code is formatted. `task all` must pass before work is considered complete!
 - After completing a task, update the `.todo` file with any remaining work or future improvements. Be specific and clear in instructions for future work.
 - This is just experimentation phase, no need to worry about breaking things or backwards compatibility. Focus on making progress and clean, simple code without worrying about stored data - we can always delete and start fresh if needed.
+- You will never have admin access to the system, so any operations that require elevated privileges are out of scope. Code that you write will have admin access, but you will not be able to run it yourself. Logging and telemetry from the code you write will be the primary way to verify its behavior and correctness. Always include comprehensive logging for any new code you write, especially for error cases, to facilitate debugging and verification by others who can run the code.
 
 ## Documentation
 

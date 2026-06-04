@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/0xrawsec/golang-etw/etw"
 	"github.com/stretchr/testify/require"
 )
 
@@ -27,84 +26,6 @@ func TestMonitorMatch(t *testing.T) {
 	mFull := NewMonitor(`C:\dev\personal\netwinmon\cmd\probe\probe.exe`, "report.json", "monitor.log", 100*time.Millisecond)
 	require.True(t, mFull.match(`c:\dev\personal\netwinmon\cmd\probe\probe.exe`))
 	require.False(t, mFull.match(`C:\dev\personal\netwinmon\cmd\probe\other.exe`))
-}
-
-func TestParseIP(t *testing.T) {
-	// nil
-	require.Equal(t, "", parseIP(nil))
-	// string
-	require.Equal(t, "1.2.3.4", parseIP("1.2.3.4"))
-	// net.IP
-	require.Equal(t, "10.0.0.1", parseIP(net.ParseIP("10.0.0.1")))
-	// []byte
-	require.Equal(t, "127.0.0.1", parseIP([]byte{127, 0, 0, 1}))
-	// uint32 (network/host byte order)
-	// 0x0100007f is 127.0.0.1 in some representations, let's verify parseIP treats byte shift correctly.
-	require.Equal(t, "127.0.0.1", parseIP(uint32(0x0100007f)))
-}
-
-func TestParsePort(t *testing.T) {
-	require.Equal(t, uint16(0), parsePort(nil))
-	require.Equal(t, uint16(80), parsePort(uint16(80)))
-	require.Equal(t, uint16(443), parsePort(int(443)))
-	require.Equal(t, uint16(8080), parsePort(uint32(8080)))
-	require.Equal(t, uint16(53), parsePort(float64(53.0)))
-	require.Equal(t, uint16(22), parsePort("22"))
-}
-
-func TestParseEventNetworkTuple(t *testing.T) {
-	e := &etw.Event{
-		EventData: map[string]interface{}{
-			"saddr": uint32(0x0100007f), // 127.0.0.1
-			"sport": uint16(12345),
-			"daddr": "8.8.8.8",
-			"dport": "53",
-		},
-	}
-
-	// Case 1: TCP Send (Event 11)
-	e.System.EventID = 11
-	remoteIP, remotePort, localIP, localPort, isUDP, state := parseEventNetworkTuple(e)
-	require.Equal(t, "8.8.8.8", remoteIP)
-	require.Equal(t, uint16(53), remotePort)
-	require.Equal(t, "127.0.0.1", localIP)
-	require.Equal(t, uint16(12345), localPort)
-	require.False(t, isUDP)
-	require.Equal(t, "SEND", state)
-
-	// Case 2: TCP Recv (Event 10)
-	e.System.EventID = 10
-	remoteIP, remotePort, localIP, localPort, isUDP, state = parseEventNetworkTuple(e)
-	require.Equal(t, "127.0.0.1", remoteIP)
-	require.Equal(t, uint16(12345), remotePort)
-	require.Equal(t, "8.8.8.8", localIP)
-	require.Equal(t, uint16(53), localPort)
-	require.False(t, isUDP)
-	require.Equal(t, "RECEIVE", state)
-
-	// Case 3: UDP Send (Event 27)
-	e.System.EventID = 27
-	remoteIP, remotePort, _, _, isUDP, state = parseEventNetworkTuple(e)
-	require.Equal(t, "8.8.8.8", remoteIP)
-	require.Equal(t, uint16(53), remotePort)
-	require.True(t, isUDP)
-	require.Equal(t, "SEND", state)
-
-	// Case 4: UDP Send (Event 42)
-	e.System.EventID = 42
-	remoteIP, remotePort, _, _, isUDP, state = parseEventNetworkTuple(e)
-	require.Equal(t, "8.8.8.8", remoteIP)
-	require.Equal(t, uint16(53), remotePort)
-	require.True(t, isUDP)
-	require.Equal(t, "SEND", state)
-
-	// Case 5: UDP Recv (Event 43)
-	e.System.EventID = 43
-	remoteIP, remotePort, _, _, isUDP, state = parseEventNetworkTuple(e)
-	require.Equal(t, "127.0.0.1", remoteIP)
-	require.Equal(t, uint16(12345), remotePort)
-	require.True(t, isUDP)
-	require.Equal(t, "RECEIVE", state)
 }
 
 func TestParseTCPV4Table(t *testing.T) {

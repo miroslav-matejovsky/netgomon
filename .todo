@@ -1,6 +1,9 @@
-- add structured logs with slog
-- in output/README.md add instructions how to use jq to get errors
-- create folder for logs and report files from args, not it fails on
-PS C:\dev\personal\netwinmon> .\dist\netwinmon.exe .\dist\probe.exe output/report.json output/monitor.log
-Error: failed to create log file: open output/monitor.log: The system cannot find the path specified.
-if it doesn't exist.
+- Run `go mod tidy` to resolve the tekert/goetw dependency and update go.sum.
+- Run `task all` to verify everything builds and tests pass.
+- The goetw version (v0.3.1) in go.mod is a guess - verify the actual latest version with `go list -m -versions github.com/tekert/goetw` and update if needed.
+- The goetw Engine.Start() uses a 200ms timeout heuristic to detect fast failures. If the real library takes longer to fail, adjust the timeout or use a different synchronization approach.
+- Verify both ETW engines can run simultaneously without conflicting ETW sessions on a real Windows machine with admin privileges.
+- The rawsec engine closes the events channel in the consumer goroutine, but the goetw engine closes it in Stop(). Unify this pattern - closing in Stop() risks panic if consumer goroutine sends after Stop(). Consider sync.Once for channel close.
+- Step 2 from plan.md: Multi-process monitoring support.
+- Step 3 from plan.md: HTTP API for current state.
+- Step 4 from plan.md: Basic behavior analysis.

@@ -8,9 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 	"unsafe"
 
+	etwapi "github.com/miroslav-matejovsky/netwinmon/internal/etw"
+	"github.com/miroslav-matejovsky/netwinmon/internal/etw/goetw"
+	"github.com/miroslav-matejovsky/netwinmon/internal/etw/rawsec"
 	"golang.org/x/sys/windows"
 )
 
@@ -103,6 +107,7 @@ type Monitor struct {
 	LogPath    string
 	Interval   time.Duration
 	logger     *Logger
+	mu         sync.RWMutex
 }
 
 // NewMonitor creates a Monitor instance.
@@ -241,27 +246,57 @@ func (m *Monitor) monitorPID(pid uint32, path string) error {
 		m.logger.Warn("Failed to get process times: %v. Using current time.", err)
 	}
 
-	// Aggregation maps.
+	// Aggregation maps (keyed by "tool:remoteIP:remotePort").
 	tcpMap := make(map[string]*TCPEndpointRecord)
 	udpMap := make(map[string]*UDPEndpointRecord)
 
-	var etwEng *ETWEngine
-	engineUsed := "polling"
+	// slog logger for ETW engines.
+	slogLogger := slog.New(slog.NewJSONHandler(m.logger.file, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	// Try starting ETW session first.
-	m.logger.Info("Attempting to initialize ETW tracing engine...")
-	etwEng = NewETWEngine(pid, tcpMap, udpMap, m.logger)
-	if err := etwEng.Start(); err == nil {
-		m.logger.Info("Successfully started ETW monitoring session: %s", etwEng.SessionName)
-		engineUsed = "etw"
+	// Start both ETW engines.
+	var engines []etwapi.Engine
+	var engineNames []string
+
+	m.logger.Info("Attempting to initialize ETW tracing engines...")
+
+	rawsecEng := rawsec.New(pid, slogLogger)
+	if err := rawsecEng.Start(); err == nil {
+		engines = append(engines, rawsecEng)
+		engineNames = append(engineNames, "rawsec")
+		m.logger.Info("rawsec ETW engine started successfully")
 	} else {
-		m.logger.Warn("Unable to start ETW trace session: %v.", err)
-		m.logger.Info("Falling back to IP Helper table polling engine...")
-		etwEng = nil
+		m.logger.Warn("rawsec ETW engine failed: %v", err)
+	}
+
+	goetwEng := goetw.New(pid, slogLogger)
+	if err := goetwEng.Start(); err == nil {
+		engines = append(engines, goetwEng)
+		engineNames = append(engineNames, "goetw")
+		m.logger.Info("goetw ETW engine started successfully")
+	} else {
+		m.logger.Warn("goetw ETW engine failed: %v", err)
+	}
+
+	usePolling := len(engines) == 0
+	if usePolling {
+		m.logger.Info("No ETW engines started. Falling back to IP Helper table polling engine...")
+		engineNames = append(engineNames, "polling")
+	}
+
+	// Fan-in: merge events from all engines into aggregation maps.
+	var wg sync.WaitGroup
+	for _, eng := range engines {
+		wg.Add(1)
+		go func(ch <-chan etwapi.NetworkEvent) {
+			defer wg.Done()
+			for ev := range ch {
+				m.handleNetworkEvent(ev, tcpMap, udpMap)
+			}
+		}(eng.Events())
 	}
 
 	// Write initial report.
-	if err := m.writeReport(pid, path, startTime, startTime, engineUsed, tcpMap, udpMap, etwEng); err != nil {
+	if err := m.writeReport(pid, path, startTime, startTime, engineNames, tcpMap, udpMap); err != nil {
 		m.logger.Warn("Failed to write initial report: %v", err)
 	}
 
@@ -269,7 +304,7 @@ func (m *Monitor) monitorPID(pid uint32, path string) error {
 
 	// Helper to snap tables (only used if falling back to polling engine).
 	snap := func() {
-		if engineUsed != "polling" {
+		if !usePolling {
 			return
 		}
 		nowStr := time.Now().UTC().Format(time.RFC3339)
@@ -280,7 +315,8 @@ func (m *Monitor) monitorPID(pid uint32, path string) error {
 			for _, conn := range tConns {
 				if conn.PID == pid {
 					matchCount++
-					key := fmt.Sprintf("%s:%d", conn.RemoteIP, conn.RemotePort)
+					key := fmt.Sprintf("polling:%s:%d", conn.RemoteIP, conn.RemotePort)
+					m.mu.Lock()
 					if rec, ok := tcpMap[key]; ok {
 						rec.LastSeen = nowStr
 						rec.Count++
@@ -294,8 +330,10 @@ func (m *Monitor) monitorPID(pid uint32, path string) error {
 							Count:         1,
 							InferredHTTP:  inferHTTP(0, conn.RemotePort),
 							States:        map[string]int{conn.State: 1},
+							Tool:          "polling",
 						}
 					}
+					m.mu.Unlock()
 				}
 			}
 			m.logger.Debug("Polling Snap: found %d total TCP connections. Matched %d to PID %d.", len(tConns), matchCount, pid)
@@ -313,7 +351,8 @@ func (m *Monitor) monitorPID(pid uint32, path string) error {
 					if ep.LocalIP.To4() == nil {
 						remoteIP = "::"
 					}
-					key := fmt.Sprintf("%s:0", remoteIP)
+					key := fmt.Sprintf("polling:%s:0", remoteIP)
+					m.mu.Lock()
 					if rec, ok := udpMap[key]; ok {
 						rec.LastSeen = nowStr
 						rec.Count++
@@ -325,8 +364,10 @@ func (m *Monitor) monitorPID(pid uint32, path string) error {
 							LastSeen:      nowStr,
 							Count:         1,
 							InferredHTTP:  inferHTTP(0, 0),
+							Tool:          "polling",
 						}
 					}
+					m.mu.Unlock()
 				}
 			}
 			m.logger.Debug("Polling Snap: found %d total UDP endpoints. Matched %d to PID %d.", len(uEps), matchCount, pid)
@@ -340,7 +381,7 @@ func (m *Monitor) monitorPID(pid uint32, path string) error {
 		snap()
 
 		// Continuously update report.
-		if err := m.writeReport(pid, path, startTime, time.Now(), engineUsed, tcpMap, udpMap, etwEng); err != nil {
+		if err := m.writeReport(pid, path, startTime, time.Now(), engineNames, tcpMap, udpMap); err != nil {
 			m.logger.Debug("Failed to write continuous report: %v", err)
 		}
 
@@ -355,14 +396,14 @@ func (m *Monitor) monitorPID(pid uint32, path string) error {
 	// Final sweep if polling.
 	snap()
 
-	// Give ETW consumer a moment to process any final buffered flush events.
+	// Give ETW consumers a moment to process any final buffered flush events.
 	time.Sleep(500 * time.Millisecond)
 
-	// Stop ETW trace session if it was started.
-	if etwEng != nil {
-		m.logger.Info("Stopping ETW tracing session...")
-		etwEng.Stop()
+	// Stop all ETW engines.
+	for _, eng := range engines {
+		eng.Stop()
 	}
+	wg.Wait()
 
 	var endTime time.Time
 	if err := windows.GetProcessTimes(h, &creationTime, &exitTime, &kernelTime, &userTime); err == nil {
@@ -376,13 +417,56 @@ func (m *Monitor) monitorPID(pid uint32, path string) error {
 	m.logger.Info("Process exited. Generating final report...")
 
 	// Write final report.
-	if err := m.writeReport(pid, path, startTime, endTime, engineUsed, tcpMap, udpMap, etwEng); err != nil {
+	if err := m.writeReport(pid, path, startTime, endTime, engineNames, tcpMap, udpMap); err != nil {
 		m.logger.Error("Failed to write final report", err)
 	} else {
 		m.logger.Info("Report written successfully. Total TCP remote endpoints: %d, UDP remote endpoints: %d.", len(tcpMap), len(udpMap))
 	}
 
 	return nil
+}
+
+// handleNetworkEvent aggregates a single ETW network event into the maps.
+func (m *Monitor) handleNetworkEvent(ev etwapi.NetworkEvent, tcpMap map[string]*TCPEndpointRecord, udpMap map[string]*UDPEndpointRecord) {
+	nowStr := ev.Timestamp.UTC().Format(time.RFC3339)
+	key := fmt.Sprintf("%s:%s:%d", ev.Tool, ev.RemoteIP, ev.RemotePort)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if ev.IsUDP {
+		if rec, ok := udpMap[key]; ok {
+			rec.LastSeen = nowStr
+			rec.Count++
+		} else {
+			udpMap[key] = &UDPEndpointRecord{
+				RemoteAddress: ev.RemoteIP,
+				RemotePort:    ev.RemotePort,
+				FirstSeen:     nowStr,
+				LastSeen:      nowStr,
+				Count:         1,
+				InferredHTTP:  inferHTTP(0, ev.RemotePort),
+				Tool:          ev.Tool,
+			}
+		}
+	} else {
+		if rec, ok := tcpMap[key]; ok {
+			rec.LastSeen = nowStr
+			rec.Count++
+			rec.States[ev.State]++
+		} else {
+			tcpMap[key] = &TCPEndpointRecord{
+				RemoteAddress: ev.RemoteIP,
+				RemotePort:    ev.RemotePort,
+				FirstSeen:     nowStr,
+				LastSeen:      nowStr,
+				Count:         1,
+				InferredHTTP:  inferHTTP(0, ev.RemotePort),
+				States:        map[string]int{ev.State: 1},
+				Tool:          ev.Tool,
+			}
+		}
+	}
 }
 
 func inferHTTP(localPort, remotePort uint16) bool {
