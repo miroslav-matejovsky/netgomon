@@ -71,11 +71,9 @@ func (e *Engine) Start() error {
 	e.consumer = teketw.NewConsumer(e.ctx)
 	e.consumer.FromSessions(e.session)
 
-	// Start() blocks, so run in goroutine. ProcessEvents registers the callback
-	// and will be called by Start's internal loop.
-	startErr := make(chan error, 1)
+	// ProcessEvents runs the callback for each event and blocks.
 	go func() {
-		e.consumer.ProcessEvents(func(event *teketw.Event) {
+		if err := e.consumer.ProcessEvents(func(event *teketw.Event) {
 			if event.System.Execution.ProcessID != e.targetPID {
 				return
 			}
@@ -88,10 +86,17 @@ func (e *Engine) Start() error {
 				return
 			}
 
-			remoteIP := etwapi.ParseIP(event.EventData[mapping.RemoteIPKey])
-			remotePort := etwapi.ParsePort(event.EventData[mapping.RemotePortKey])
-			localIP := etwapi.ParseIP(event.EventData[mapping.LocalIPKey])
-			localPort := etwapi.ParsePort(event.EventData[mapping.LocalPortKey])
+			remoteIPData, _ := event.GetProperty(mapping.RemoteIPKey)
+			remoteIP := etwapi.ParseIP(remoteIPData)
+
+			remotePortData, _ := event.GetProperty(mapping.RemotePortKey)
+			remotePort := etwapi.ParsePort(remotePortData)
+
+			localIPData, _ := event.GetProperty(mapping.LocalIPKey)
+			localIP := etwapi.ParseIP(localIPData)
+
+			localPortData, _ := event.GetProperty(mapping.LocalPortKey)
+			localPort := etwapi.ParsePort(localPortData)
 
 			if remoteIP == "" || remotePort == 0 {
 				return
@@ -117,24 +122,14 @@ func (e *Engine) Start() error {
 			}:
 			case <-e.ctx.Done():
 			}
-		})
-
-		if err := e.consumer.Start(); err != nil {
-			startErr <- err
-			return
+		}); err != nil {
+			e.logger.Error("goetw: event processing error", "error", err)
 		}
-		startErr <- nil
 	}()
 
-	// Give consumer a moment to start; if it fails fast, catch the error.
-	select {
-	case err := <-startErr:
-		if err != nil {
-			_ = e.session.Stop()
-			return fmt.Errorf("goetw: failed to start consumer: %w", err)
-		}
-	case <-time.After(200 * time.Millisecond):
-		// consumer started successfully (blocking in background)
+	if err := e.consumer.Start(); err != nil {
+		_ = e.session.Stop()
+		return fmt.Errorf("goetw: failed to start consumer: %w", err)
 	}
 
 	e.logger.Info("goetw: ETW session started", "pid", e.targetPID)
