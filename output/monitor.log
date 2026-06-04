@@ -1,21 +1,16 @@
-{"time":"2026-06-04T06:39:19.1546763+02:00","level":"INFO","msg":"Netwinmon session started. Target: C:\\dev\\personal\\netwinmon\\dist\\probe.exe, Report: output/report.json, Log: output/monitor.log"}
-{"time":"2026-06-04T06:39:19.1552085+02:00","level":"INFO","msg":"Checking administrative status..."}
-{"time":"2026-06-04T06:39:19.1555829+02:00","level":"INFO","msg":"Running as Administrator."}
-{"time":"2026-06-04T06:39:19.1555829+02:00","level":"INFO","msg":"Scanning running processes to exclude existing instances..."}
-{"time":"2026-06-04T06:39:19.1857981+02:00","level":"INFO","msg":"Excluding 0 already running instances."}
-{"time":"2026-06-04T06:39:19.1857981+02:00","level":"INFO","msg":"Waiting for next instance of C:\\dev\\personal\\netwinmon\\dist\\probe.exe..."}
-{"time":"2026-06-04T06:39:25.5287096+02:00","level":"INFO","msg":"Found next process instance. PID: 12828, Path: C:\\dev\\personal\\netwinmon\\dist\\probe.exe"}
-{"time":"2026-06-04T06:39:25.5292172+02:00","level":"INFO","msg":"Opening handle to target PID 12828..."}
-{"time":"2026-06-04T06:39:25.5309375+02:00","level":"INFO","msg":"Target process creation time (UTC): 2026-06-04T04:39:25Z"}
-{"time":"2026-06-04T06:39:25.5309375+02:00","level":"INFO","msg":"Attempting to initialize ETW tracing engines..."}
-{"time":"2026-06-04T06:39:25.804917+02:00","level":"INFO","msg":"rawsec: ETW session started","pid":12828}
-{"time":"2026-06-04T06:39:25.804917+02:00","level":"INFO","msg":"rawsec ETW engine started successfully"}
-{"time":"2026-06-04T06:39:26.0040263+02:00","level":"INFO","msg":"goetw: ETW session started","pid":12828}
-{"time":"2026-06-04T06:39:26.0040263+02:00","level":"INFO","msg":"goetw ETW engine started successfully"}
-{"time":"2026-06-04T06:39:26.006122+02:00","level":"INFO","msg":"Monitoring network activity of PID 12828... Press Ctrl+C to abort."}
-{"time":"2026-06-04T06:39:46.8596381+02:00","level":"INFO","msg":"Target process exit detected by WaitForSingleObject."}
-{"time":"2026-06-04T06:39:47.36418+02:00","level":"INFO","msg":"rawsec: ETW session stopped","totalEvents":0}
-{"time":"2026-06-04T06:39:47.3685145+02:00","level":"INFO","msg":"goetw: ETW session stopped","totalEvents":0}
-{"time":"2026-06-04T06:39:47.3685145+02:00","level":"INFO","msg":"Target process exit time (UTC): 2026-06-04T04:39:46Z"}
-{"time":"2026-06-04T06:39:47.3685145+02:00","level":"INFO","msg":"Process exited. Generating final report..."}
-{"time":"2026-06-04T06:39:47.3695755+02:00","level":"INFO","msg":"Report written successfully. Total TCP remote endpoints: 0, UDP remote endpoints: 0."}
+{"time":"2026-06-04T10:43:16.1457535+02:00","level":"INFO","msg":"Netwinmon session started. Targets: [C:\\dev\\personal\\netwinmon\\dist\\probe.exe], Report: output/report.json, Log: output/monitor.log"}
+{"time":"2026-06-04T10:43:16.1457535+02:00","level":"INFO","msg":"Checking administrative status..."}
+{"time":"2026-06-04T10:43:16.1475134+02:00","level":"INFO","msg":"Running as Administrator."}
+{"time":"2026-06-04T10:43:16.1475134+02:00","level":"INFO","msg":"Monitoring existing and new process instances."}
+{"time":"2026-06-04T10:43:16.1486121+02:00","level":"INFO","msg":"Scanning for target processes... Press Ctrl+C to abort."}
+{"time":"2026-06-04T10:43:27.0630694+02:00","level":"INFO","msg":"Found target process. PID: 29248, Path: C:\\dev\\personal\\netwinmon\\dist\\probe.exe"}
+{"time":"2026-06-04T10:43:27.0635979+02:00","level":"INFO","msg":"Opening handle to target PID 29248..."}
+{"time":"2026-06-04T10:43:27.0655636+02:00","level":"INFO","msg":"PID 29248 creation time (UTC): 2026-06-04T08:43:27Z"}
+{"time":"2026-06-04T10:43:27.3700874+02:00","level":"INFO","msg":"goetw: ETW session started","pid":29248}
+{"time":"2026-06-04T10:43:27.3700874+02:00","level":"INFO","msg":"PID 29248: goetw ETW engine started"}
+{"time":"2026-06-04T10:43:27.3711931+02:00","level":"INFO","msg":"PID 29248: Monitoring network activity. Engines: [goetw]"}
+{"time":"2026-06-04T10:43:56.124863+02:00","level":"INFO","msg":"PID 29248: Process exit detected."}
+{"time":"2026-06-04T10:43:56.6308402+02:00","level":"INFO","msg":"goetw: ETW session stopped","total_events":0,"pid_matches":0,"mapped_events":0,"parse_failures":0}
+{"time":"2026-06-04T10:43:56.6308402+02:00","level":"INFO","msg":"PID 29248: Monitoring complete. TCP endpoints: 0, UDP endpoints: 0"}
+{"time":"2026-06-04T10:44:00.8627661+02:00","level":"INFO","msg":"Monitor cancelled by user (signal)."}
+{"time":"2026-06-04T10:44:00.863335+02:00","level":"INFO","msg":"Final report written."}

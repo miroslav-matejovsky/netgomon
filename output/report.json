@@ -1,12 +1,4 @@
 {
-  "pid": 12828,
-  "path": "C:\\dev\\personal\\netwinmon\\dist\\probe.exe",
-  "start_time": "2026-06-04T04:39:25Z",
-  "end_time": "2026-06-04T04:39:46Z",
-  "engines": [
-    "rawsec",
-    "goetw"
-  ],
-  "tcp_connections": [],
-  "udp_endpoints": []
+  "generated_at": "2026-06-04T08:44:00Z",
+  "processes": null
 }

@@ -7,15 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miroslav-matejovsky/netwinmon/internal/privilege"
 	teketw "github.com/tekert/goetw/etw"
 )
 
 func TestETWEvents(t *testing.T) {
-	if !privilege.IsElevated() {
-		t.Skip("requires admin privileges for ETW session")
-	}
-
 	session := teketw.NewRealTimeSession("Test_NetWinMon_Session")
 	_ = session.Stop() // cleanup
 

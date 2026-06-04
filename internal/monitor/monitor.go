@@ -16,7 +16,6 @@ import (
 	etwapi "github.com/miroslav-matejovsky/netwinmon/internal/etw"
 	"github.com/miroslav-matejovsky/netwinmon/internal/etw/goetw"
 	"github.com/miroslav-matejovsky/netwinmon/internal/etw/rawsec"
-	"github.com/miroslav-matejovsky/netwinmon/internal/privilege"
 	"golang.org/x/sys/windows"
 )
 
@@ -219,11 +218,6 @@ func (m *Monitor) Run(ctx context.Context) error {
 
 	m.logger.Info("Netwinmon session started. Targets: %v, Report: %s, Log: %s", m.TargetExes, m.ReportPath, m.LogPath)
 	m.logger.Info("Checking administrative status...")
-	if privilege.IsElevated() {
-		m.logger.Info("Running as Administrator.")
-	} else {
-		m.logger.Warn("Running without Administrator privileges. ETW engine will fail and fall back to polling.")
-	}
 
 	// Determine initial known PIDs.
 	var knownPIDs map[uint32]string
