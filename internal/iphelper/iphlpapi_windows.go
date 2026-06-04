@@ -1,6 +1,6 @@
 //go:build windows
 
-package monitor
+package iphelper
 
 import (
 	"fmt"

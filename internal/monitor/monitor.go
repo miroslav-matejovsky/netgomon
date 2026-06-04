@@ -17,6 +17,7 @@ import (
 	etwapi "github.com/miroslav-matejovsky/netwinmon/internal/etw"
 	"github.com/miroslav-matejovsky/netwinmon/internal/etw/goetw"
 	"github.com/miroslav-matejovsky/netwinmon/internal/etw/rawsec"
+	"github.com/miroslav-matejovsky/netwinmon/internal/iphelper"
 	"golang.org/x/sys/windows"
 )
 
@@ -403,7 +404,7 @@ func (m *Monitor) monitorPID(ctx context.Context, pid uint32, path string, slogL
 		}
 		nowStr := time.Now().UTC().Format(time.RFC3339)
 
-		if tConns, err := GetTCPConnections(); err == nil {
+		if tConns, err := iphelper.GetTCPConnections(); err == nil {
 			matchCount := 0
 			for _, conn := range tConns {
 				if conn.PID == pid {
@@ -434,7 +435,7 @@ func (m *Monitor) monitorPID(ctx context.Context, pid uint32, path string, slogL
 			m.logger.Error("Polling TCP error", "pid", pid, "error", err)
 		}
 
-		if uEps, err := GetUDPEndpoints(); err == nil {
+		if uEps, err := iphelper.GetUDPEndpoints(); err == nil {
 			matchCount := 0
 			for _, ep := range uEps {
 				if ep.PID == pid {

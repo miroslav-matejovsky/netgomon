@@ -5,3 +5,4 @@
 - Consider adding DNS resolution correlation - match UDP port 53 traffic with subsequent TCP connections.
 - Add integration tests that start probe.exe and verify report.json content (requires separate test runner).
 - Verify that context cancellation correctly shuts down ETW engines (goetw, rawsec) without resource leaks, now that context is passed from the main application.
+- Consider extracting the IP Helper API polling fallback logic from monitor.go into a dedicated polling engine component that implements the etw.Engine interface.
