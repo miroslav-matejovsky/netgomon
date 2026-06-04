@@ -86,7 +86,7 @@ func TestMonitorWithMockEngine(t *testing.T) {
 	m.activeProcesses[uint32(cmd.Process.Pid)] = &ProcessState{
 		PID:  uint32(cmd.Process.Pid),
 		Path: targetExe,
-		TCP: map[string]*TCPEndpointRecord{
+		TCP: map[string]*TCPEndpoint{
 			"mock:1.2.3.4:80": {
 				RemoteAddress: "1.2.3.4",
 				RemotePort:    80,
@@ -97,7 +97,7 @@ func TestMonitorWithMockEngine(t *testing.T) {
 				Tool:          "mock",
 			},
 		},
-		UDP: map[string]*UDPEndpointRecord{},
+		UDP: map[string]*UDPEndpoint{},
 	}
 	m.mu.Unlock()
 

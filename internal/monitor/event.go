@@ -10,7 +10,7 @@ import (
 )
 
 // handleNetworkEvent aggregates a single ETW network event into the maps.
-func (m *Monitor) handleNetworkEvent(ev etwapi.NetworkEvent, tcpMap map[string]*TCPEndpointRecord, udpMap map[string]*UDPEndpointRecord) {
+func (m *Monitor) handleNetworkEvent(ev etwapi.NetworkEvent, tcpMap map[string]*TCPEndpoint, udpMap map[string]*UDPEndpoint) {
 	nowStr := ev.Timestamp.UTC().Format(time.RFC3339)
 	key := fmt.Sprintf("%s:%s:%d", ev.Tool, ev.RemoteIP, ev.RemotePort)
 
@@ -22,7 +22,7 @@ func (m *Monitor) handleNetworkEvent(ev etwapi.NetworkEvent, tcpMap map[string]*
 			rec.LastSeen = nowStr
 			rec.Count++
 		} else {
-			udpMap[key] = &UDPEndpointRecord{
+			udpMap[key] = &UDPEndpoint{
 				RemoteAddress: ev.RemoteIP,
 				RemotePort:    ev.RemotePort,
 				FirstSeen:     nowStr,
@@ -45,7 +45,7 @@ func (m *Monitor) handleNetworkEvent(ev etwapi.NetworkEvent, tcpMap map[string]*
 			if ev.State == "CONNECT_FAIL" {
 				failed = 1
 			}
-			tcpMap[key] = &TCPEndpointRecord{
+			tcpMap[key] = &TCPEndpoint{
 				RemoteAddress:     ev.RemoteIP,
 				RemotePort:        ev.RemotePort,
 				FirstSeen:         nowStr,

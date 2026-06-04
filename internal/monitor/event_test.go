@@ -25,8 +25,8 @@ func TestFailedConnectionTracking(t *testing.T) {
 	mock := &mockEngine{events: make(chan etwapi.NetworkEvent, 10)}
 	m := NewMonitor([]string{"ping.exe"}, reportPath, logPath, 10*time.Millisecond, mock)
 
-	tcpMap := make(map[string]*TCPEndpointRecord)
-	udpMap := make(map[string]*UDPEndpointRecord)
+	tcpMap := make(map[string]*TCPEndpoint)
+	udpMap := make(map[string]*UDPEndpoint)
 
 	// Successful connect.
 	m.handleNetworkEvent(etwapi.NetworkEvent{

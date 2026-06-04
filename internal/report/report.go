@@ -1,4 +1,4 @@
-package monitor
+package report
 
 import (
 	"encoding/json"
@@ -49,8 +49,8 @@ type Report struct {
 	Processes   []ProcessReport `json:"processes"`
 }
 
-// calcFrequency computes events per minute from first/last seen timestamps and count.
-func calcFrequency(firstSeen, lastSeen string, count int) float64 {
+// CalcFrequency computes events per minute from first/last seen timestamps and count.
+func CalcFrequency(firstSeen, lastSeen string, count int) float64 {
 	if count <= 1 {
 		return float64(count)
 	}
@@ -66,53 +66,18 @@ func calcFrequency(firstSeen, lastSeen string, count int) float64 {
 	return math.Round(float64(count)/durationMin*100) / 100
 }
 
-func (m *Monitor) writeReport() error {
-	m.mu.RLock()
-
-	var processes []ProcessReport
-	for _, ps := range m.activeProcesses {
-		pr := ProcessReport{
-			PID:       ps.PID,
-			Path:      ps.Path,
-			StartTime: ps.StartTime.UTC().Format(time.RFC3339),
-		}
-
-		tcpConns := make([]TCPEndpointRecord, 0, len(ps.TCP))
-		for _, rec := range ps.TCP {
-			r := *rec
-			r.EventFrequency = calcFrequency(r.FirstSeen, r.LastSeen, r.Count)
-			tcpConns = append(tcpConns, r)
-		}
-		pr.TCPConnections = tcpConns
-
-		udpEps := make([]UDPEndpointRecord, 0, len(ps.UDP))
-		for _, rec := range ps.UDP {
-			r := *rec
-			r.EventFrequency = calcFrequency(r.FirstSeen, r.LastSeen, r.Count)
-			udpEps = append(udpEps, r)
-		}
-		pr.UDPEndpoints = udpEps
-
-		processes = append(processes, pr)
-	}
-	m.mu.RUnlock()
-
-	report := Report{
-		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
-		Processes:   processes,
-	}
-
-	reportBytes, err := json.MarshalIndent(report, "", "  ")
+// Write serializes the report to JSON and writes it to the specified path.
+func Write(path string, rep Report) error {
+	reportBytes, err := json.MarshalIndent(rep, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	// Ensure report parent directory exists.
-	if dir := filepath.Dir(m.ReportPath); dir != "." {
+	if dir := filepath.Dir(path); dir != "." {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return err
 		}
 	}
 
-	return os.WriteFile(m.ReportPath, reportBytes, 0644)
+	return os.WriteFile(path, reportBytes, 0644)
 }

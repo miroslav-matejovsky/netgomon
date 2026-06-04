@@ -36,8 +36,8 @@ func (m *Monitor) monitorPID(ctx context.Context, pid uint32, path string, slogL
 	}
 
 	// Per-process aggregation maps.
-	tcpMap := make(map[string]*TCPEndpointRecord)
-	udpMap := make(map[string]*UDPEndpointRecord)
+	tcpMap := make(map[string]*TCPEndpoint)
+	udpMap := make(map[string]*UDPEndpoint)
 
 	m.mu.Lock()
 	m.activeProcesses[pid] = &ProcessState{
@@ -126,7 +126,7 @@ func (m *Monitor) monitorPID(ctx context.Context, pid uint32, path string, slogL
 						rec.Count++
 						rec.States[conn.State]++
 					} else {
-						tcpMap[key] = &TCPEndpointRecord{
+						tcpMap[key] = &TCPEndpoint{
 							RemoteAddress: conn.RemoteIP.String(),
 							RemotePort:    conn.RemotePort,
 							FirstSeen:     nowStr,
@@ -160,7 +160,7 @@ func (m *Monitor) monitorPID(ctx context.Context, pid uint32, path string, slogL
 						rec.LastSeen = nowStr
 						rec.Count++
 					} else {
-						udpMap[key] = &UDPEndpointRecord{
+						udpMap[key] = &UDPEndpoint{
 							RemoteAddress: remoteIP,
 							RemotePort:    0,
 							FirstSeen:     nowStr,

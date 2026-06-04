@@ -14,6 +14,7 @@ import (
 
 	etwapi "github.com/miroslav-matejovsky/netwinmon/internal/etw"
 	"github.com/miroslav-matejovsky/netwinmon/internal/pid"
+	"github.com/miroslav-matejovsky/netwinmon/internal/report"
 )
 
 // Monitor monitors target executables' network activity.
@@ -31,13 +32,34 @@ type Monitor struct {
 	activeProcesses map[uint32]*ProcessState
 }
 
-// ProcessState represents the real-time state of a monitored process.
 type ProcessState struct {
-	PID       uint32                        `json:"pid"`
-	Path      string                        `json:"path"`
-	StartTime time.Time                     `json:"startTime"`
-	TCP       map[string]*TCPEndpointRecord `json:"tcp"`
-	UDP       map[string]*UDPEndpointRecord `json:"udp"`
+	PID       uint32
+	Path      string
+	StartTime time.Time
+	TCP       map[string]*TCPEndpoint
+	UDP       map[string]*UDPEndpoint
+}
+
+type TCPEndpoint struct {
+	RemoteAddress     string
+	RemotePort        uint16
+	FirstSeen         string
+	LastSeen          string
+	Count             int
+	InferredHTTP      bool
+	States            map[string]int
+	Tool              string
+	FailedConnections int
+}
+
+type UDPEndpoint struct {
+	RemoteAddress string
+	RemotePort    uint16
+	FirstSeen     string
+	LastSeen      string
+	Count         int
+	InferredHTTP  bool
+	Tool          string
 }
 
 // NewMonitor creates a Monitor instance. Accepts one or more target executables.
@@ -66,8 +88,8 @@ func (m *Monitor) GetState() map[uint32]*ProcessState {
 			PID:       ps.PID,
 			Path:      ps.Path,
 			StartTime: ps.StartTime,
-			TCP:       make(map[string]*TCPEndpointRecord),
-			UDP:       make(map[string]*UDPEndpointRecord),
+			TCP:       make(map[string]*TCPEndpoint),
+			UDP:       make(map[string]*UDPEndpoint),
 		}
 		for k, v := range ps.TCP {
 			vCopy := *v
@@ -102,8 +124,8 @@ func (m *Monitor) GetProcessState(pid uint32) *ProcessState {
 		PID:       ps.PID,
 		Path:      ps.Path,
 		StartTime: ps.StartTime,
-		TCP:       make(map[string]*TCPEndpointRecord),
-		UDP:       make(map[string]*UDPEndpointRecord),
+		TCP:       make(map[string]*TCPEndpoint),
+		UDP:       make(map[string]*UDPEndpoint),
 	}
 	for k, v := range ps.TCP {
 		vCopy := *v
@@ -234,4 +256,57 @@ cleanup:
 	}
 
 	return nil
+}
+
+func (m *Monitor) writeReport() error {
+	m.mu.RLock()
+	var processes []report.ProcessReport
+	for _, ps := range m.activeProcesses {
+		pr := report.ProcessReport{
+			PID:       ps.PID,
+			Path:      ps.Path,
+			StartTime: ps.StartTime.UTC().Format(time.RFC3339),
+		}
+
+		tcpConns := make([]report.TCPEndpointRecord, 0, len(ps.TCP))
+		for _, rec := range ps.TCP {
+			tcpConns = append(tcpConns, report.TCPEndpointRecord{
+				RemoteAddress:     rec.RemoteAddress,
+				RemotePort:        rec.RemotePort,
+				FirstSeen:         rec.FirstSeen,
+				LastSeen:          rec.LastSeen,
+				Count:             rec.Count,
+				InferredHTTP:      rec.InferredHTTP,
+				States:            rec.States,
+				Tool:              rec.Tool,
+				FailedConnections: rec.FailedConnections,
+				EventFrequency:    report.CalcFrequency(rec.FirstSeen, rec.LastSeen, rec.Count),
+			})
+		}
+		pr.TCPConnections = tcpConns
+
+		udpEps := make([]report.UDPEndpointRecord, 0, len(ps.UDP))
+		for _, rec := range ps.UDP {
+			udpEps = append(udpEps, report.UDPEndpointRecord{
+				RemoteAddress:  rec.RemoteAddress,
+				RemotePort:     rec.RemotePort,
+				FirstSeen:      rec.FirstSeen,
+				LastSeen:       rec.LastSeen,
+				Count:          rec.Count,
+				InferredHTTP:   rec.InferredHTTP,
+				Tool:           rec.Tool,
+				EventFrequency: report.CalcFrequency(rec.FirstSeen, rec.LastSeen, rec.Count),
+			})
+		}
+		pr.UDPEndpoints = udpEps
+		processes = append(processes, pr)
+	}
+	m.mu.RUnlock()
+
+	rep := report.Report{
+		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+		Processes:   processes,
+	}
+
+	return report.Write(m.ReportPath, rep)
 }
