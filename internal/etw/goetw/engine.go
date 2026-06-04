@@ -17,13 +17,14 @@ const toolName = "goetw"
 
 // Engine implements etw.Engine using the tekert/goetw library.
 type Engine struct {
-	targetPID uint32
-	session   *teketw.RealTimeSession
-	consumer  *teketw.Consumer
-	events    chan etwapi.NetworkEvent
-	ctx       context.Context
-	cancel    context.CancelFunc
-	logger    *slog.Logger
+	targetPID   uint32
+	session     *teketw.RealTimeSession
+	consumer    *teketw.Consumer
+	events      chan etwapi.NetworkEvent
+	ctx         context.Context
+	cancel      context.CancelFunc
+	logger      *slog.Logger
+	totalEvents uint64
 }
 
 // New creates a goetw ETW engine for the given target PID.
@@ -74,8 +75,14 @@ func (e *Engine) Start() error {
 	// ProcessEvents runs the callback for each event and blocks.
 	go func() {
 		if err := e.consumer.ProcessEvents(func(event *teketw.Event) {
-			pidData, _ := event.GetProperty("PID")
-			actualPID := etwapi.ParsePID(pidData)
+			e.totalEvents++
+			var actualPID uint32
+			for _, p := range event.EventData {
+				if p.Name == "PID" || p.Name == "pid" || p.Name == "ProcessId" || p.Name == "ProcessID" {
+					actualPID = etwapi.ParsePID(p.Value)
+					break
+				}
+			}
 			if actualPID == 0 {
 				actualPID = event.System.Execution.ProcessID
 			}
@@ -83,6 +90,8 @@ func (e *Engine) Start() error {
 			if actualPID != e.targetPID {
 				return
 			}
+
+			e.logger.Info("goetw: matched PID event", "event_id", event.System.EventID, "keys", getKeysGoetw(event.EventData))
 
 			mapping := etwapi.MapEventID(event.System.EventID)
 			if mapping == nil {
@@ -158,7 +167,7 @@ func (e *Engine) Stop() {
 		_ = e.session.Stop()
 	}
 	close(e.events)
-	e.logger.Info("goetw: ETW session stopped")
+	e.logger.Info("goetw: ETW session stopped", "totalEvents", e.totalEvents)
 }
 
 func getKeysGoetw(props teketw.Properties) []string {

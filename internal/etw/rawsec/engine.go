@@ -17,13 +17,14 @@ const toolName = "rawsec"
 
 // Engine implements etw.Engine using the 0xrawsec/golang-etw library.
 type Engine struct {
-	targetPID uint32
-	session   *rawetw.RealTimeSession
-	consumer  *rawetw.Consumer
-	events    chan etwapi.NetworkEvent
-	ctx       context.Context
-	cancel    context.CancelFunc
-	logger    *slog.Logger
+	targetPID   uint32
+	session     *rawetw.RealTimeSession
+	consumer    *rawetw.Consumer
+	events      chan etwapi.NetworkEvent
+	ctx         context.Context
+	cancel      context.CancelFunc
+	logger      *slog.Logger
+	totalEvents uint64
 }
 
 // New creates a rawsec ETW engine for the given target PID.
@@ -72,7 +73,14 @@ func (e *Engine) Start() error {
 	e.consumer.FromSessions(e.session)
 
 	e.consumer.EventCallback = func(event *rawetw.Event) error {
-		actualPID := etwapi.ParsePID(event.EventData["PID"])
+		e.totalEvents++
+		var actualPID uint32
+		for k, v := range event.EventData {
+			if k == "PID" || k == "pid" || k == "ProcessId" || k == "ProcessID" {
+				actualPID = etwapi.ParsePID(v)
+				break
+			}
+		}
 		if actualPID == 0 {
 			actualPID = event.System.Execution.ProcessID
 		}
@@ -80,6 +88,8 @@ func (e *Engine) Start() error {
 		if actualPID != e.targetPID {
 			return nil
 		}
+
+		e.logger.Info("rawsec: matched PID event", "event_id", event.System.EventID, "keys", getKeysRaw(event.EventData))
 
 		mapping := etwapi.MapEventID(event.System.EventID)
 		if mapping == nil {
@@ -148,7 +158,8 @@ func (e *Engine) Stop() {
 	if e.session != nil {
 		_ = e.session.Stop()
 	}
-	e.logger.Info("rawsec: ETW session stopped")
+	close(e.events)
+	e.logger.Info("rawsec: ETW session stopped", "totalEvents", e.totalEvents)
 }
 
 func getKeysRaw(m map[string]interface{}) []string {
