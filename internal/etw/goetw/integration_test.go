@@ -9,13 +9,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
-// TestIntegrationGoETWWithProbe starts probe.exe and uses goetw engine to capture its network events.
+// TestIntegrationGoETWWithProbe starts the goetw engine, then launches probe.exe to generate
+// network traffic, and verifies that ETW events are captured for the probe PID.
 // Requires admin privileges for ETW session. Skips if unavailable.
 func TestIntegrationGoETWWithProbe(t *testing.T) {
 	logFile := setupTestLog(t, "goetw_integration")
@@ -24,16 +26,17 @@ func TestIntegrationGoETWWithProbe(t *testing.T) {
 	probePath := findProbe(t, logger)
 	logger.Info("probe path resolved", "path", probePath)
 
-	// Start probe in fast mode.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Start probe to get a PID. Engine needs PID to filter events.
 	cmd := exec.CommandContext(ctx, probePath, "fast")
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	err := cmd.Start()
 	require.NoError(t, err, "failed to start probe.exe")
-	logger.Info("probe started", "pid", cmd.Process.Pid)
+	pid := uint32(cmd.Process.Pid)
+	logger.Info("probe started", "pid", pid)
 
 	defer func() {
 		cancel()
@@ -41,12 +44,8 @@ func TestIntegrationGoETWWithProbe(t *testing.T) {
 		logger.Info("probe stopped")
 	}()
 
-	pid := uint32(cmd.Process.Pid)
-
-	// Give probe a moment to start its first network calls.
-	time.Sleep(2 * time.Second)
+	// Create and start engine IMMEDIATELY so it captures probe's network calls.
 	logger.Info("creating goetw engine", "target_pid", pid)
-
 	eng := New(ctx, pid, logger)
 	err = eng.Start()
 	if err != nil {
@@ -57,27 +56,36 @@ func TestIntegrationGoETWWithProbe(t *testing.T) {
 
 	defer func() {
 		eng.Stop()
-		logger.Info("goetw engine stopped",
+		logger.Info("goetw engine stopped after test",
 			"total_events", eng.stats.totalEvents.Load(),
 			"pid_matches", eng.stats.pidMatches.Load(),
 			"mapped_events", eng.stats.mappedEvents.Load(),
 			"parse_failures", eng.stats.parseFailures.Load())
 	}()
 
-	// Collect events for up to 10 seconds, waiting for probe to do its thing.
-	deadline := time.After(10 * time.Second)
+	// Give engine a moment to fully initialize consumer.
+	time.Sleep(500 * time.Millisecond)
+	logger.Info("engine init wait done, probe should be generating traffic now")
+
+	// Collect events for up to 15 seconds (probe in fast mode does iteration every 1s).
+	// Probe does HTTP, TCP, failed-TCP (2s timeout), UDP per iteration.
+	deadline := time.After(15 * time.Second)
 	var collected []string
+	channelClosed := false
 	logger.Info("collecting events...")
 
 	for {
 		select {
 		case ev, ok := <-eng.Events():
 			if !ok {
-				logger.Info("event channel closed")
+				channelClosed = true
+				logger.Warn("event channel closed before deadline")
+				t.Log("WARNING: event channel closed before deadline")
 				goto done
 			}
-			desc := fmt.Sprintf("pid=%d remote=%s:%d local=%s:%d udp=%v state=%s tool=%s",
-				ev.PID, ev.RemoteIP, ev.RemotePort, ev.LocalIP, ev.LocalPort, ev.IsUDP, ev.State, ev.Tool)
+			desc := fmt.Sprintf("pid=%d remote=%s:%d local=%s:%d udp=%v state=%s tool=%s ts=%s",
+				ev.PID, ev.RemoteIP, ev.RemotePort, ev.LocalIP, ev.LocalPort,
+				ev.IsUDP, ev.State, ev.Tool, ev.Timestamp.Format(time.RFC3339))
 			logger.Info("captured event", "event", desc)
 			collected = append(collected, desc)
 		case <-deadline:
@@ -87,26 +95,50 @@ func TestIntegrationGoETWWithProbe(t *testing.T) {
 	}
 
 done:
-	logger.Info("collection finished", "total_captured", len(collected))
+	// Log engine stats.
+	totalEvents := eng.stats.totalEvents.Load()
+	pidMatches := eng.stats.pidMatches.Load()
+	mappedEvents := eng.stats.mappedEvents.Load()
+	parseFailures := eng.stats.parseFailures.Load()
+
+	logger.Info("collection finished",
+		"total_captured", len(collected),
+		"channel_closed_early", channelClosed,
+		"engine_total_events", totalEvents,
+		"engine_pid_matches", pidMatches,
+		"engine_mapped_events", mappedEvents,
+		"engine_parse_failures", parseFailures)
 
 	for i, ev := range collected {
 		logger.Info("event summary", "index", i, "event", ev)
 		t.Logf("Event[%d]: %s", i, ev)
 	}
 
-	// Log stats even if no events captured - useful for debugging.
-	logger.Info("final engine stats",
-		"total_events", eng.stats.totalEvents.Load(),
-		"pid_matches", eng.stats.pidMatches.Load(),
-		"mapped_events", eng.stats.mappedEvents.Load(),
-		"parse_failures", eng.stats.parseFailures.Load())
+	// Diagnostic: log event ID distribution.
+	eng.stats.eventIDCounts.Range(func(key, value interface{}) bool {
+		id := key.(uint16)
+		count := value.(*atomic.Uint64)
+		logger.Info("event ID distribution", "event_id", id, "count", count.Load())
+		t.Logf("EventID %d: count=%d", id, count.Load())
+		return true
+	})
 
-	if len(collected) == 0 {
-		t.Logf("WARNING: no events captured for PID %d - check logs at .test-results/", pid)
-		logger.Warn("no events captured - this may indicate a problem or just timing", "pid", pid)
-	} else {
-		t.Logf("Captured %d events from probe PID %d", len(collected), pid)
+	t.Logf("Engine stats: total=%d pid_matches=%d mapped=%d failures=%d channel_closed=%v",
+		totalEvents, pidMatches, mappedEvents, parseFailures, channelClosed)
+
+	if totalEvents == 0 {
+		logger.Error("goetw received 0 total events - consumer ProcessEvents callback never invoked")
 	}
+
+	// Assertions.
+	require.False(t, channelClosed,
+		"event channel should not close before deadline - consumer may have stopped prematurely")
+	require.Greater(t, totalEvents, uint64(0),
+		"goetw engine should receive at least some ETW events from the system")
+	require.Greater(t, len(collected), 0,
+		"should capture at least one network event from probe PID %d", pid)
+
+	t.Logf("SUCCESS: captured %d events from probe PID %d", len(collected), pid)
 }
 
 // setupTestLog creates a log file in .test-results/ for this test run.
@@ -130,7 +162,6 @@ func setupTestLog(t *testing.T, prefix string) *os.File {
 func findProbe(t *testing.T, logger *slog.Logger) string {
 	t.Helper()
 
-	// Try relative from test package location.
 	candidates := []string{
 		filepath.Join("..", "..", "..", "dist", "probe.exe"),
 	}

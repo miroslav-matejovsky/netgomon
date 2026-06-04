@@ -64,8 +64,8 @@ func TestIntegrationIPHelperWithProbe(t *testing.T) {
 				if conn.PID == pid {
 					roundMatches++
 					totalTCPMatches++
-					desc := fmt.Sprintf("local=%s:%d remote=%s:%d state=%s",
-						conn.LocalIP, conn.LocalPort, conn.RemoteIP, conn.RemotePort, conn.State)
+					desc := fmt.Sprintf("round=%d local=%s:%d remote=%s:%d state=%s",
+						round, conn.LocalIP, conn.LocalPort, conn.RemoteIP, conn.RemotePort, conn.State)
 					logger.Info("TCP match for probe",
 						"round", round,
 						"pid", conn.PID,
@@ -74,7 +74,7 @@ func TestIntegrationIPHelperWithProbe(t *testing.T) {
 						"remote_ip", conn.RemoteIP.String(),
 						"remote_port", conn.RemotePort,
 						"state", conn.State)
-					t.Logf("Round %d TCP: %s", round, desc)
+					t.Logf("TCP: %s", desc)
 				}
 			}
 			logger.Info("TCP round summary", "round", round, "matches", roundMatches, "total_entries", len(tcpConns))
@@ -92,13 +92,13 @@ func TestIntegrationIPHelperWithProbe(t *testing.T) {
 				if ep.PID == pid {
 					roundMatches++
 					totalUDPMatches++
-					desc := fmt.Sprintf("local=%s:%d", ep.LocalIP, ep.LocalPort)
+					desc := fmt.Sprintf("round=%d local=%s:%d", round, ep.LocalIP, ep.LocalPort)
 					logger.Info("UDP match for probe",
 						"round", round,
 						"pid", ep.PID,
 						"local_ip", ep.LocalIP.String(),
 						"local_port", ep.LocalPort)
-					t.Logf("Round %d UDP: %s", round, desc)
+					t.Logf("UDP: %s", desc)
 				}
 			}
 			logger.Info("UDP round summary", "round", round, "matches", roundMatches, "total_entries", len(udpEps))
@@ -117,16 +117,19 @@ func TestIntegrationIPHelperWithProbe(t *testing.T) {
 
 	t.Logf("Total TCP matches: %d, UDP matches: %d across %d rounds", totalTCPMatches, totalUDPMatches, pollRounds)
 
-	if totalTCPMatches == 0 && totalUDPMatches == 0 {
-		logger.Warn("no connections found for probe - connections may be too short-lived for polling to catch")
-		t.Logf("WARNING: no connections found for probe PID %d - check logs at .test-results/", pid)
-	}
+	// Assertions.
+	// Probe connects to 192.0.2.1:12345 (TCP fail, SYN_SENT for 2s) - very likely to be caught by polling.
+	require.Greater(t, totalTCPMatches, 0,
+		"should catch at least one TCP connection from probe (e.g. SYN_SENT to 192.0.2.1:12345)")
+
+	t.Logf("SUCCESS: captured %d TCP and %d UDP matches from probe PID %d", totalTCPMatches, totalUDPMatches, pid)
 }
 
 // setupTestLog creates a log file in .test-results/ for this test run.
 func setupTestLog(t *testing.T, prefix string) *os.File {
 	t.Helper()
-	outDir := filepath.Join("..", "..", "..", ".test-results")
+	// iphelper is at internal/iphelper/ - 2 levels from root.
+	outDir := filepath.Join("..", "..", ".test-results")
 	err := os.MkdirAll(outDir, 0755)
 	require.NoError(t, err, "failed to create .test-results dir")
 
@@ -144,6 +147,7 @@ func setupTestLog(t *testing.T, prefix string) *os.File {
 func findProbe(t *testing.T, logger *slog.Logger) string {
 	t.Helper()
 
+	// iphelper is at internal/iphelper/ - 2 levels from root.
 	candidates := []string{
 		filepath.Join("..", "..", "dist", "probe.exe"),
 	}
