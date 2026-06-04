@@ -5,6 +5,7 @@ package monitor
 import (
 	"context"
 	"encoding/binary"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
@@ -146,10 +147,10 @@ func TestMonitorWithMockEngine(t *testing.T) {
 		}
 	}()
 
-	logger, err := NewLogger(logPath)
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	require.NoError(t, err)
-	m.logger = logger
-	defer logger.Close()
+	defer func() { _ = f.Close() }()
+	m.logger = slog.New(slog.NewTextHandler(f, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	m.monitorPID(ctx, uint32(cmd.Process.Pid), targetExe, nil)
 
