@@ -15,7 +15,7 @@ import (
 
 func TestAPIState(t *testing.T) {
 	// Setup monitor with empty engines so it doesn't try to use ETW.
-	m := monitor.NewMonitor("dummy.exe", "dummy_report.json", "dummy.log", 100*time.Millisecond)
+	m := monitor.NewMonitor([]string{"dummy.exe"}, "dummy_report.json", "dummy.log", 100*time.Millisecond)
 
 	// We can't easily populate monitor's internal activeProcesses map from outside
 	// without starting a run loop or mocking it, but we can verify the endpoint
@@ -43,8 +43,31 @@ func TestAPIState(t *testing.T) {
 	require.Empty(t, state)
 }
 
+func TestAPIStatePID(t *testing.T) {
+	m := monitor.NewMonitor([]string{"dummy.exe"}, "dummy_report.json", "dummy.log", 100*time.Millisecond)
+	srv := NewServer(":0", m)
+
+	// Non-existent PID returns 404.
+	req := httptest.NewRequest(http.MethodGet, "/state/9999", nil)
+	w := httptest.NewRecorder()
+	srv.handleStatePID(w, req)
+	require.Equal(t, http.StatusNotFound, w.Code)
+
+	// Invalid PID returns 400.
+	req2 := httptest.NewRequest(http.MethodGet, "/state/abc", nil)
+	w2 := httptest.NewRecorder()
+	srv.handleStatePID(w2, req2)
+	require.Equal(t, http.StatusBadRequest, w2.Code)
+
+	// Wrong method returns 405.
+	req3 := httptest.NewRequest(http.MethodPost, "/state/1234", nil)
+	w3 := httptest.NewRecorder()
+	srv.handleStatePID(w3, req3)
+	require.Equal(t, http.StatusMethodNotAllowed, w3.Code)
+}
+
 func TestAPIStartStop(t *testing.T) {
-	m := monitor.NewMonitor("dummy.exe", "dummy_report.json", "dummy.log", 100*time.Millisecond)
+	m := monitor.NewMonitor([]string{"dummy.exe"}, "dummy_report.json", "dummy.log", 100*time.Millisecond)
 	srv := NewServer("127.0.0.1:0", m)
 
 	err := srv.Start()

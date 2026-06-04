@@ -29,6 +29,51 @@ func TestParsePID(t *testing.T) {
 	require.Equal(t, uint32(9012), ParsePID(uint64(9012)))
 	require.Equal(t, uint32(3456), ParsePID(float64(3456.0)))
 	require.Equal(t, uint32(7890), ParsePID("7890"))
+	require.Equal(t, uint32(1111), ParsePID(int64(1111)))
+	require.Equal(t, uint32(2222), ParsePID(int32(2222)))
+}
+
+func TestFindPIDInMap(t *testing.T) {
+	// Exact "PID" key
+	require.Equal(t, uint32(100), FindPIDInMap(map[string]interface{}{"PID": uint32(100)}))
+	// Case-insensitive "pid"
+	require.Equal(t, uint32(200), FindPIDInMap(map[string]interface{}{"pid": uint32(200)}))
+	// "ProcessId" key
+	require.Equal(t, uint32(300), FindPIDInMap(map[string]interface{}{"ProcessId": uint32(300)}))
+	// "ProcessID" key
+	require.Equal(t, uint32(400), FindPIDInMap(map[string]interface{}{"ProcessID": uint32(400)}))
+	// "processid" lowercase
+	require.Equal(t, uint32(500), FindPIDInMap(map[string]interface{}{"processid": uint32(500)}))
+	// No PID field
+	require.Equal(t, uint32(0), FindPIDInMap(map[string]interface{}{"saddr": "1.2.3.4"}))
+	// Empty map
+	require.Equal(t, uint32(0), FindPIDInMap(map[string]interface{}{}))
+	// Nil map
+	require.Equal(t, uint32(0), FindPIDInMap(nil))
+}
+
+func TestFindPIDInSlice(t *testing.T) {
+	pairs := []NamedValue{
+		{Name: "saddr", Value: "1.2.3.4"},
+		{Name: "PID", Value: uint32(999)},
+		{Name: "dport", Value: uint16(80)},
+	}
+	require.Equal(t, uint32(999), FindPIDInSlice(pairs))
+
+	// Case-insensitive
+	pairs2 := []NamedValue{
+		{Name: "processId", Value: uint32(888)},
+	}
+	require.Equal(t, uint32(888), FindPIDInSlice(pairs2))
+
+	// No PID
+	pairs3 := []NamedValue{
+		{Name: "saddr", Value: "1.2.3.4"},
+	}
+	require.Equal(t, uint32(0), FindPIDInSlice(pairs3))
+
+	// Empty
+	require.Equal(t, uint32(0), FindPIDInSlice(nil))
 }
 
 func TestParsePort(t *testing.T) {

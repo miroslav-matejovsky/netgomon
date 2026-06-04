@@ -12,15 +12,10 @@ import (
 
 	"github.com/miroslav-matejovsky/netwinmon/internal/api"
 	"github.com/miroslav-matejovsky/netwinmon/internal/monitor"
-	"golang.org/x/sys/windows"
 )
 
 // Run parses arguments and starts the monitor.
 func Run(ctx context.Context) error {
-	if !isAdmin() {
-		return errors.New("administrator privileges are required to run this tool")
-	}
-
 	if len(os.Args) < 2 {
 		printUsage()
 		return errors.New("missing arguments")
@@ -50,7 +45,7 @@ func Run(ctx context.Context) error {
 		target = absPath
 	}
 
-	m := monitor.NewMonitor(target, reportPath, logPath, 100*time.Millisecond)
+	m := monitor.NewMonitor([]string{target}, reportPath, logPath, 100*time.Millisecond)
 
 	apiSrv := api.NewServer("127.0.0.1:8080", m)
 	if err := apiSrv.Start(); err != nil {
@@ -63,10 +58,6 @@ func Run(ctx context.Context) error {
 	}()
 
 	return m.Run(ctx)
-}
-
-func isAdmin() bool {
-	return windows.GetCurrentProcessToken().IsElevated()
 }
 
 func printUsage() {

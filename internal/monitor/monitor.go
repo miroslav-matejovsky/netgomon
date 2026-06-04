@@ -16,6 +16,7 @@ import (
 	etwapi "github.com/miroslav-matejovsky/netwinmon/internal/etw"
 	"github.com/miroslav-matejovsky/netwinmon/internal/etw/goetw"
 	"github.com/miroslav-matejovsky/netwinmon/internal/etw/rawsec"
+	"github.com/miroslav-matejovsky/netwinmon/internal/privilege"
 	"golang.org/x/sys/windows"
 )
 
@@ -101,12 +102,13 @@ func (l *Logger) Close() {
 	}
 }
 
-// Monitor monitors the target executable's network activity.
+// Monitor monitors target executables' network activity.
 type Monitor struct {
-	TargetExe  string
+	TargetExes []string
 	ReportPath string
 	LogPath    string
 	Interval   time.Duration
+	NewOnly    bool // if true, only monitor newly started processes
 
 	logger  *Logger
 	mu      sync.RWMutex
@@ -124,13 +126,13 @@ type ProcessState struct {
 	UDP       map[string]*UDPEndpointRecord `json:"udp"`
 }
 
-// NewMonitor creates a Monitor instance.
-func NewMonitor(targetExe, reportPath, logPath string, interval time.Duration, engines ...etwapi.Engine) *Monitor {
+// NewMonitor creates a Monitor instance. Accepts one or more target executables.
+func NewMonitor(targetExes []string, reportPath, logPath string, interval time.Duration, engines ...etwapi.Engine) *Monitor {
 	if interval <= 0 {
 		interval = 100 * time.Millisecond
 	}
 	return &Monitor{
-		TargetExe:       targetExe,
+		TargetExes:      targetExes,
 		ReportPath:      reportPath,
 		LogPath:         logPath,
 		Interval:        interval,
@@ -155,7 +157,6 @@ func (m *Monitor) GetState() map[uint32]*ProcessState {
 		}
 		for k, v := range ps.TCP {
 			vCopy := *v
-			// deep copy states map if needed, but it is created per connection.
 			if v.States != nil {
 				vCopy.States = make(map[string]int)
 				for sk, sv := range v.States {
@@ -173,7 +174,41 @@ func (m *Monitor) GetState() map[uint32]*ProcessState {
 	return state
 }
 
-// Run waits for the next process instance and monitors it.
+// GetProcessState returns a snapshot of a single process state, or nil if not found.
+func (m *Monitor) GetProcessState(pid uint32) *ProcessState {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	ps, ok := m.activeProcesses[pid]
+	if !ok {
+		return nil
+	}
+
+	pCopy := &ProcessState{
+		PID:       ps.PID,
+		Path:      ps.Path,
+		StartTime: ps.StartTime,
+		TCP:       make(map[string]*TCPEndpointRecord),
+		UDP:       make(map[string]*UDPEndpointRecord),
+	}
+	for k, v := range ps.TCP {
+		vCopy := *v
+		if v.States != nil {
+			vCopy.States = make(map[string]int)
+			for sk, sv := range v.States {
+				vCopy.States[sk] = sv
+			}
+		}
+		pCopy.TCP[k] = &vCopy
+	}
+	for k, v := range ps.UDP {
+		vCopy := *v
+		pCopy.UDP[k] = &vCopy
+	}
+	return pCopy
+}
+
+// Run continuously scans for target processes and monitors them.
 func (m *Monitor) Run(ctx context.Context) error {
 	logger, err := NewLogger(m.LogPath)
 	if err != nil {
@@ -182,49 +217,110 @@ func (m *Monitor) Run(ctx context.Context) error {
 	m.logger = logger
 	defer m.logger.Close()
 
-	m.logger.Info("Netwinmon session started. Target: %s, Report: %s, Log: %s", m.TargetExe, m.ReportPath, m.LogPath)
+	m.logger.Info("Netwinmon session started. Targets: %v, Report: %s, Log: %s", m.TargetExes, m.ReportPath, m.LogPath)
 	m.logger.Info("Checking administrative status...")
-	if windows.GetCurrentProcessToken().IsElevated() {
+	if privilege.IsElevated() {
 		m.logger.Info("Running as Administrator.")
 	} else {
 		m.logger.Warn("Running without Administrator privileges. ETW engine will fail and fall back to polling.")
 	}
 
-	m.logger.Info("Scanning running processes to exclude existing instances...")
-	knownPIDs, err := m.findCurrentPIDs()
-	if err != nil {
-		return fmt.Errorf("failed listing current processes: %w", err)
-	}
-	m.logger.Info("Excluding %d already running instances.", len(knownPIDs))
-
-	m.logger.Info("Waiting for next instance of %s...", m.TargetExe)
-	var pid uint32
-	var path string
-	for {
-		current, err := m.findCurrentPIDs()
+	// Determine initial known PIDs.
+	var knownPIDs map[uint32]string
+	if m.NewOnly {
+		m.logger.Info("NewOnly mode: scanning running processes to exclude existing instances...")
+		knownPIDs, err = m.findCurrentPIDs()
 		if err != nil {
 			return fmt.Errorf("failed listing current processes: %w", err)
 		}
-		for p, pPath := range current {
-			if _, exists := knownPIDs[p]; !exists {
-				pid = p
-				path = pPath
-				break
+		m.logger.Info("Excluding %d already running instances.", len(knownPIDs))
+	} else {
+		knownPIDs = make(map[uint32]string)
+		m.logger.Info("Monitoring existing and new process instances.")
+	}
+
+	// slog logger for ETW engines.
+	slogLogger := slog.New(slog.NewJSONHandler(m.logger.file, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	// Track which PIDs we've already started monitoring.
+	monitoredPIDs := make(map[uint32]bool)
+	for pid := range knownPIDs {
+		monitoredPIDs[pid] = true
+	}
+
+	var wg sync.WaitGroup
+
+	// Write initial empty report.
+	if err := m.writeReport(); err != nil {
+		m.logger.Warn("Failed to write initial report: %v", err)
+	}
+
+	m.logger.Info("Scanning for target processes... Press Ctrl+C to abort.")
+
+	// Report writer goroutine.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(m.Interval):
+				if err := m.writeReport(); err != nil {
+					m.logger.Debug("Failed to write continuous report: %v", err)
+				}
 			}
 		}
-		if pid != 0 {
-			break
-		}
+	}()
+
+	// Main scanner loop.
+	for {
 		select {
 		case <-ctx.Done():
-			m.logger.Info("Monitor cancelled while waiting for process.")
-			return ctx.Err()
-		case <-time.After(100 * time.Millisecond):
+			m.logger.Info("Monitor cancelled by user (signal).")
+			goto cleanup
+		default:
+		}
+
+		current, err := m.findCurrentPIDs()
+		if err != nil {
+			m.logger.Warn("Failed to scan processes: %v", err)
+		} else {
+			for pid, path := range current {
+				if monitoredPIDs[pid] {
+					continue
+				}
+				monitoredPIDs[pid] = true
+				m.logger.Info("Found target process. PID: %d, Path: %s", pid, path)
+
+				wg.Add(1)
+				go func(p uint32, pPath string) {
+					defer wg.Done()
+					m.monitorPID(ctx, p, pPath, slogLogger)
+				}(pid, path)
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			m.logger.Info("Monitor cancelled by user (signal).")
+			goto cleanup
+		case <-time.After(m.Interval):
 		}
 	}
 
-	m.logger.Info("Found next process instance. PID: %d, Path: %s", pid, path)
-	return m.monitorPID(ctx, pid, path)
+cleanup:
+	// Wait for all monitoring goroutines to finish.
+	wg.Wait()
+
+	// Write final report.
+	if err := m.writeReport(); err != nil {
+		m.logger.Error("Failed to write final report", err)
+	} else {
+		m.logger.Info("Final report written.")
+	}
+
+	return nil
 }
 
 func (m *Monitor) findCurrentPIDs() (map[uint32]string, error) {
@@ -251,7 +347,7 @@ func (m *Monitor) findCurrentPIDs() (map[uint32]string, error) {
 			_ = windows.CloseHandle(pHandle)
 			if err == nil {
 				procPath := windows.UTF16ToString(buf[:size])
-				if m.match(procPath) {
+				if m.matchAny(procPath) {
 					pids[entry.ProcessID] = procPath
 				}
 			}
@@ -264,8 +360,17 @@ func (m *Monitor) findCurrentPIDs() (map[uint32]string, error) {
 	return pids, nil
 }
 
-func (m *Monitor) match(procPath string) bool {
-	absTarget, err := filepath.Abs(m.TargetExe)
+func (m *Monitor) matchAny(procPath string) bool {
+	for _, target := range m.TargetExes {
+		if matchTarget(target, procPath) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchTarget(target, procPath string) bool {
+	absTarget, err := filepath.Abs(target)
 	if err == nil {
 		absTarget = filepath.Clean(absTarget)
 		absProc := filepath.Clean(procPath)
@@ -273,8 +378,8 @@ func (m *Monitor) match(procPath string) bool {
 			return true
 		}
 	}
-	if !strings.ContainsAny(m.TargetExe, `/\`) {
-		targetBase := filepath.Base(m.TargetExe)
+	if !strings.ContainsAny(target, `/\`) {
+		targetBase := filepath.Base(target)
 		procBase := filepath.Base(procPath)
 		if strings.EqualFold(procBase, targetBase) {
 			return true
@@ -283,11 +388,12 @@ func (m *Monitor) match(procPath string) bool {
 	return false
 }
 
-func (m *Monitor) monitorPID(ctx context.Context, pid uint32, path string) error {
+func (m *Monitor) monitorPID(ctx context.Context, pid uint32, path string, slogLogger *slog.Logger) {
 	m.logger.Info("Opening handle to target PID %d...", pid)
 	h, err := windows.OpenProcess(windows.SYNCHRONIZE|windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
 	if err != nil {
-		return fmt.Errorf("failed to open process handle: %w", err)
+		m.logger.Warn("Failed to open process handle for PID %d: %v", pid, err)
+		return
 	}
 	defer func() { _ = windows.CloseHandle(h) }()
 
@@ -295,13 +401,13 @@ func (m *Monitor) monitorPID(ctx context.Context, pid uint32, path string) error
 	var startTime time.Time
 	if err := windows.GetProcessTimes(h, &creationTime, &exitTime, &kernelTime, &userTime); err == nil {
 		startTime = filetimeToTime(creationTime)
-		m.logger.Info("Target process creation time (UTC): %s", startTime.UTC().Format(time.RFC3339))
+		m.logger.Info("PID %d creation time (UTC): %s", pid, startTime.UTC().Format(time.RFC3339))
 	} else {
 		startTime = time.Now()
-		m.logger.Warn("Failed to get process times: %v. Using current time.", err)
+		m.logger.Warn("Failed to get process times for PID %d: %v. Using current time.", pid, err)
 	}
 
-	// Aggregation maps (keyed by "tool:remoteIP:remotePort").
+	// Per-process aggregation maps.
 	tcpMap := make(map[string]*TCPEndpointRecord)
 	udpMap := make(map[string]*UDPEndpointRecord)
 
@@ -321,14 +427,10 @@ func (m *Monitor) monitorPID(ctx context.Context, pid uint32, path string) error
 		m.mu.Unlock()
 	}()
 
-	// slog logger for ETW engines.
-	slogLogger := slog.New(slog.NewJSONHandler(m.logger.file, &slog.HandlerOptions{Level: slog.LevelDebug}))
-
-	// Start both ETW engines if none injected.
+	// Start ETW engine for this PID (or use injected mock).
 	var engines []etwapi.Engine
 	var engineNames []string
-
-	m.logger.Info("Attempting to initialize ETW tracing engines...")
+	usePolling := false
 
 	if len(m.engines) > 0 {
 		engines = m.engines
@@ -336,60 +438,54 @@ func (m *Monitor) monitorPID(ctx context.Context, pid uint32, path string) error
 			_ = eng.Start()
 			engineNames = append(engineNames, "mock")
 		}
-		m.logger.Info("Using injected mock engines for testing")
+		m.logger.Info("PID %d: Using injected mock engines for testing", pid)
 	} else {
-		rawsecEng := rawsec.New(pid, slogLogger)
-		if err := rawsecEng.Start(); err == nil {
-			engines = append(engines, rawsecEng)
-			engineNames = append(engineNames, "rawsec")
-			m.logger.Info("rawsec ETW engine started successfully")
-		} else {
-			m.logger.Warn("rawsec ETW engine failed: %v", err)
-		}
-
+		// Try goetw first (primary), fall back to rawsec if it fails.
 		goetwEng := goetw.New(pid, slogLogger)
 		if err := goetwEng.Start(); err == nil {
 			engines = append(engines, goetwEng)
 			engineNames = append(engineNames, "goetw")
-			m.logger.Info("goetw ETW engine started successfully")
+			m.logger.Info("PID %d: goetw ETW engine started", pid)
 		} else {
-			m.logger.Warn("goetw ETW engine failed: %v", err)
+			m.logger.Warn("PID %d: goetw ETW engine failed: %v. Trying rawsec...", pid, err)
+			rawsecEng := rawsec.New(pid, slogLogger)
+			if err := rawsecEng.Start(); err == nil {
+				engines = append(engines, rawsecEng)
+				engineNames = append(engineNames, "rawsec")
+				m.logger.Info("PID %d: rawsec ETW engine started", pid)
+			} else {
+				m.logger.Warn("PID %d: rawsec ETW engine failed: %v", pid, err)
+			}
 		}
 	}
 
-	usePolling := len(engines) == 0
-	if usePolling {
-		m.logger.Info("No ETW engines started. Falling back to IP Helper table polling engine...")
+	if len(engines) == 0 {
+		usePolling = true
 		engineNames = append(engineNames, "polling")
+		m.logger.Info("PID %d: No ETW engines. Using polling fallback.", pid)
 	}
 
-	// Fan-in: merge events from all engines into aggregation maps.
-	var wg sync.WaitGroup
+	// Fan-in from engine channels.
+	var fanWg sync.WaitGroup
 	for _, eng := range engines {
-		wg.Add(1)
+		fanWg.Add(1)
 		go func(ch <-chan etwapi.NetworkEvent) {
-			defer wg.Done()
+			defer fanWg.Done()
 			for ev := range ch {
 				m.handleNetworkEvent(ev, tcpMap, udpMap)
 			}
 		}(eng.Events())
 	}
 
-	// Write initial report.
-	if err := m.writeReport(pid, path, startTime, startTime, engineNames, tcpMap, udpMap); err != nil {
-		m.logger.Warn("Failed to write initial report: %v", err)
-	}
+	m.logger.Info("PID %d: Monitoring network activity. Engines: %v", pid, engineNames)
 
-	m.logger.Info("Monitoring network activity of PID %d... Press Ctrl+C to abort.", pid)
-
-	// Helper to snap tables (only used if falling back to polling engine).
+	// Polling snap helper.
 	snap := func() {
 		if !usePolling {
 			return
 		}
 		nowStr := time.Now().UTC().Format(time.RFC3339)
 
-		// Snap TCP.
 		if tConns, err := GetTCPConnections(); err == nil {
 			matchCount := 0
 			for _, conn := range tConns {
@@ -416,12 +512,11 @@ func (m *Monitor) monitorPID(ctx context.Context, pid uint32, path string) error
 					m.mu.Unlock()
 				}
 			}
-			m.logger.Debug("Polling Snap: found %d total TCP connections. Matched %d to PID %d.", len(tConns), matchCount, pid)
+			m.logger.Debug("PID %d: Polling found %d TCP total, %d matched.", pid, len(tConns), matchCount)
 		} else {
-			m.logger.Error("Polling Error: failed to get TCP connections", err)
+			m.logger.Error("PID %d: Polling TCP error", err)
 		}
 
-		// Snap UDP.
 		if uEps, err := GetUDPEndpoints(); err == nil {
 			matchCount := 0
 			for _, ep := range uEps {
@@ -450,75 +545,54 @@ func (m *Monitor) monitorPID(ctx context.Context, pid uint32, path string) error
 					m.mu.Unlock()
 				}
 			}
-			m.logger.Debug("Polling Snap: found %d total UDP endpoints. Matched %d to PID %d.", len(uEps), matchCount, pid)
+			m.logger.Debug("PID %d: Polling found %d UDP total, %d matched.", pid, len(uEps), matchCount)
 		} else {
-			m.logger.Error("Polling Error: failed to get UDP endpoints", err)
+			m.logger.Error("PID %d: Polling UDP error", err)
 		}
 	}
 
-	// Main monitoring loop.
+	// Wait for process to exit.
 	for {
 		select {
 		case <-ctx.Done():
-			m.logger.Info("Monitor cancelled by user (signal).")
-			goto cleanup
+			m.logger.Info("PID %d: Monitor cancelled.", pid)
+			goto done
 		default:
 		}
 
 		snap()
 
-		// Continuously update report.
-		if err := m.writeReport(pid, path, startTime, time.Now(), engineNames, tcpMap, udpMap); err != nil {
-			m.logger.Debug("Failed to write continuous report: %v", err)
-		}
-
 		event, err := windows.WaitForSingleObject(h, 0)
 		if err == nil && event == windows.WAIT_OBJECT_0 {
-			m.logger.Info("Target process exit detected by WaitForSingleObject.")
+			m.logger.Info("PID %d: Process exit detected.", pid)
 			break
 		}
 
 		select {
 		case <-ctx.Done():
-			m.logger.Info("Monitor cancelled by user (signal).")
-			goto cleanup
+			m.logger.Info("PID %d: Monitor cancelled.", pid)
+			goto done
 		case <-time.After(m.Interval):
 		}
 	}
 
-cleanup:
-
-	// Final sweep if polling.
+done:
+	// Final polling sweep.
 	snap()
 
-	// Give ETW consumers a moment to process any final buffered flush events.
+	// Give ETW a moment to flush.
 	time.Sleep(500 * time.Millisecond)
 
-	// Stop all ETW engines.
 	for _, eng := range engines {
 		eng.Stop()
 	}
-	wg.Wait()
+	fanWg.Wait()
 
-	var endTime time.Time
-	if err := windows.GetProcessTimes(h, &creationTime, &exitTime, &kernelTime, &userTime); err == nil {
-		endTime = filetimeToTime(exitTime)
-		m.logger.Info("Target process exit time (UTC): %s", endTime.UTC().Format(time.RFC3339))
-	} else {
-		endTime = time.Now()
-		m.logger.Warn("Failed to get process exit times: %v. Using current time.", err)
-	}
-
-	m.logger.Info("Process exited. Generating final report...")
-
-	// Write final report.
-	if err := m.writeReport(pid, path, startTime, endTime, engineNames, tcpMap, udpMap); err != nil {
-		m.logger.Error("Failed to write final report", err)
-	} else {
-		m.logger.Info("Report written successfully. Total TCP remote endpoints: %d, UDP remote endpoints: %d.", len(tcpMap), len(udpMap))
-	}
-
-	return nil
+	m.mu.RLock()
+	tcpCount := len(tcpMap)
+	udpCount := len(udpMap)
+	m.mu.RUnlock()
+	m.logger.Info("PID %d: Monitoring complete. TCP endpoints: %d, UDP endpoints: %d", pid, tcpCount, udpCount)
 }
 
 // handleNetworkEvent aggregates a single ETW network event into the maps.
@@ -549,16 +623,24 @@ func (m *Monitor) handleNetworkEvent(ev etwapi.NetworkEvent, tcpMap map[string]*
 			rec.LastSeen = nowStr
 			rec.Count++
 			rec.States[ev.State]++
+			if ev.State == "CONNECT_FAIL" {
+				rec.FailedConnections++
+			}
 		} else {
+			failed := 0
+			if ev.State == "CONNECT_FAIL" {
+				failed = 1
+			}
 			tcpMap[key] = &TCPEndpointRecord{
-				RemoteAddress: ev.RemoteIP,
-				RemotePort:    ev.RemotePort,
-				FirstSeen:     nowStr,
-				LastSeen:      nowStr,
-				Count:         1,
-				InferredHTTP:  inferHTTP(0, ev.RemotePort),
-				States:        map[string]int{ev.State: 1},
-				Tool:          ev.Tool,
+				RemoteAddress:     ev.RemoteIP,
+				RemotePort:        ev.RemotePort,
+				FirstSeen:         nowStr,
+				LastSeen:          nowStr,
+				Count:             1,
+				InferredHTTP:      inferHTTP(0, ev.RemotePort),
+				States:            map[string]int{ev.State: 1},
+				Tool:              ev.Tool,
+				FailedConnections: failed,
 			}
 		}
 	}

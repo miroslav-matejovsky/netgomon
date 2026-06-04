@@ -35,6 +35,7 @@ func main() {
 
 		testHTTP()
 		testTCP()
+		testFailedTCP()
 		testUDP()
 		i++
 		log("sleeping... (next in " + interval.String() + ") use ctrl+c to stop")

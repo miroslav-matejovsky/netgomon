@@ -6,6 +6,7 @@ import "time"
 
 // NetworkEvent represents a single network event captured by an ETW engine.
 type NetworkEvent struct {
+	PID        uint32
 	RemoteIP   string
 	RemotePort uint16
 	LocalIP    string

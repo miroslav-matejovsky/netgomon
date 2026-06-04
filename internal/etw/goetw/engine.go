@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	teketw "github.com/tekert/goetw/etw"
@@ -15,16 +17,30 @@ import (
 
 const toolName = "goetw"
 
+// engineStats tracks diagnostic counters for ETW event processing.
+type engineStats struct {
+	totalEvents   atomic.Uint64
+	mappedEvents  atomic.Uint64
+	pidMatches    atomic.Uint64
+	parseFailures atomic.Uint64
+	eventIDCounts sync.Map // map[uint16]uint64
+}
+
+func (s *engineStats) incEventID(id uint16) {
+	val, _ := s.eventIDCounts.LoadOrStore(id, new(atomic.Uint64))
+	val.(*atomic.Uint64).Add(1)
+}
+
 // Engine implements etw.Engine using the tekert/goetw library.
 type Engine struct {
-	targetPID   uint32
-	session     *teketw.RealTimeSession
-	consumer    *teketw.Consumer
-	events      chan etwapi.NetworkEvent
-	ctx         context.Context
-	cancel      context.CancelFunc
-	logger      *slog.Logger
-	totalEvents uint64
+	targetPID uint32
+	session   *teketw.RealTimeSession
+	consumer  *teketw.Consumer
+	events    chan etwapi.NetworkEvent
+	ctx       context.Context
+	cancel    context.CancelFunc
+	logger    *slog.Logger
+	stats     engineStats
 }
 
 // New creates a goetw ETW engine for the given target PID.
@@ -75,77 +91,7 @@ func (e *Engine) Start() error {
 	// ProcessEvents runs the callback for each event and blocks.
 	go func() {
 		if err := e.consumer.ProcessEvents(func(event *teketw.Event) {
-			e.totalEvents++
-			var actualPID uint32
-			for _, p := range event.EventData {
-				if p.Name == "PID" || p.Name == "pid" || p.Name == "ProcessId" || p.Name == "ProcessID" {
-					actualPID = etwapi.ParsePID(p.Value)
-					break
-				}
-			}
-			if actualPID == 0 {
-				actualPID = event.System.Execution.ProcessID
-			}
-
-			if e.totalEvents <= 50 {
-				e.logger.Info("goetw: event dump", "event_id", event.System.EventID, "exec_pid", event.System.Execution.ProcessID, "actualPID", actualPID, "keys", getKeysGoetw(event.EventData))
-			}
-
-			if actualPID != e.targetPID {
-				return
-			}
-
-			e.logger.Info("goetw: matched PID event", "event_id", event.System.EventID, "keys", getKeysGoetw(event.EventData))
-
-			mapping := etwapi.MapEventID(event.System.EventID)
-			if mapping == nil {
-				e.logger.Debug("goetw: unmapped ETW event",
-					"event_id", event.System.EventID,
-					"pid", event.System.Execution.ProcessID)
-				return
-			}
-
-			remoteIPData, _ := event.GetProperty(mapping.RemoteIPKey)
-			remoteIP := etwapi.ParseIP(remoteIPData)
-
-			remotePortData, _ := event.GetProperty(mapping.RemotePortKey)
-			remotePort := etwapi.ParsePort(remotePortData)
-
-			localIPData, _ := event.GetProperty(mapping.LocalIPKey)
-			localIP := etwapi.ParseIP(localIPData)
-
-			localPortData, _ := event.GetProperty(mapping.LocalPortKey)
-			localPort := etwapi.ParsePort(localPortData)
-
-			if remoteIP == "" || remotePort == 0 {
-				e.logger.Info("goetw: failed to parse remote endpoint",
-					"event_id", event.System.EventID,
-					"remote_ip_key", mapping.RemoteIPKey,
-					"remote_port_key", mapping.RemotePortKey,
-					"all_keys", getKeysGoetw(event.EventData))
-				return
-			}
-
-			e.logger.Debug("goetw: network event",
-				"event_id", event.System.EventID,
-				"remote", fmt.Sprintf("%s:%d", remoteIP, remotePort),
-				"local", fmt.Sprintf("%s:%d", localIP, localPort),
-				"udp", mapping.IsUDP,
-				"state", mapping.State)
-
-			select {
-			case e.events <- etwapi.NetworkEvent{
-				RemoteIP:   remoteIP,
-				RemotePort: remotePort,
-				LocalIP:    localIP,
-				LocalPort:  localPort,
-				IsUDP:      mapping.IsUDP,
-				State:      mapping.State,
-				Timestamp:  event.System.TimeCreated.SystemTime,
-				Tool:       toolName,
-			}:
-			case <-e.ctx.Done():
-			}
+			e.processEvent(event)
 		}); err != nil {
 			e.logger.Error("goetw: event processing error", "error", err)
 		}
@@ -161,6 +107,110 @@ func (e *Engine) Start() error {
 	return nil
 }
 
+func (e *Engine) processEvent(event *teketw.Event) {
+	total := e.stats.totalEvents.Add(1)
+	e.stats.incEventID(event.System.EventID)
+
+	// Extract PID using case-insensitive matching.
+	pairs := make([]etwapi.NamedValue, len(event.EventData))
+	for i, p := range event.EventData {
+		pairs[i] = etwapi.NamedValue{Name: p.Name, Value: p.Value}
+	}
+	actualPID := etwapi.FindPIDInSlice(pairs)
+	pidSource := "eventdata"
+	if actualPID == 0 {
+		actualPID = event.System.Execution.ProcessID
+		pidSource = "execution"
+	}
+
+	// Log first 20 events for diagnostics.
+	if total <= 20 {
+		e.logger.Info("goetw: event sample",
+			"event_id", event.System.EventID,
+			"exec_pid", event.System.Execution.ProcessID,
+			"data_pid", actualPID,
+			"pid_source", pidSource,
+			"keys", getKeysGoetw(event.EventData))
+	}
+
+	if actualPID != e.targetPID {
+		return
+	}
+
+	e.stats.pidMatches.Add(1)
+	matchCount := e.stats.pidMatches.Load()
+
+	mapping := etwapi.MapEventID(event.System.EventID)
+	if mapping == nil {
+		e.logger.Debug("goetw: unmapped event for target PID",
+			"event_id", event.System.EventID,
+			"pid", actualPID)
+		return
+	}
+
+	e.stats.mappedEvents.Add(1)
+
+	remoteIPData, _ := event.GetProperty(mapping.RemoteIPKey)
+	remoteIP := etwapi.ParseIP(remoteIPData)
+
+	remotePortData, _ := event.GetProperty(mapping.RemotePortKey)
+	remotePort := etwapi.ParsePort(remotePortData)
+
+	localIPData, _ := event.GetProperty(mapping.LocalIPKey)
+	localIP := etwapi.ParseIP(localIPData)
+
+	localPortData, _ := event.GetProperty(mapping.LocalPortKey)
+	localPort := etwapi.ParsePort(localPortData)
+
+	// Dump full event data for first 10 PID-matched events.
+	if matchCount <= 10 {
+		e.logger.Info("goetw: matched PID event detail",
+			"event_id", event.System.EventID,
+			"state", mapping.State,
+			"remote_ip", remoteIP,
+			"remote_port", remotePort,
+			"local_ip", localIP,
+			"local_port", localPort,
+			"udp", mapping.IsUDP,
+			"all_fields", dumpFieldsGoetw(event.EventData))
+	}
+
+	if remoteIP == "" || remotePort == 0 {
+		e.stats.parseFailures.Add(1)
+		e.logger.Info("goetw: failed to parse remote endpoint",
+			"event_id", event.System.EventID,
+			"state", mapping.State,
+			"remote_ip_key", mapping.RemoteIPKey,
+			"remote_port_key", mapping.RemotePortKey,
+			"remote_ip_raw", fmt.Sprintf("%v (%T)", remoteIPData, remoteIPData),
+			"remote_port_raw", fmt.Sprintf("%v (%T)", remotePortData, remotePortData),
+			"all_keys", getKeysGoetw(event.EventData))
+		return
+	}
+
+	e.logger.Debug("goetw: network event",
+		"event_id", event.System.EventID,
+		"remote", fmt.Sprintf("%s:%d", remoteIP, remotePort),
+		"local", fmt.Sprintf("%s:%d", localIP, localPort),
+		"udp", mapping.IsUDP,
+		"state", mapping.State)
+
+	select {
+	case e.events <- etwapi.NetworkEvent{
+		PID:        actualPID,
+		RemoteIP:   remoteIP,
+		RemotePort: remotePort,
+		LocalIP:    localIP,
+		LocalPort:  localPort,
+		IsUDP:      mapping.IsUDP,
+		State:      mapping.State,
+		Timestamp:  event.System.TimeCreated.SystemTime,
+		Tool:       toolName,
+	}:
+	case <-e.ctx.Done():
+	}
+}
+
 // Stop terminates the ETW session and consumer.
 func (e *Engine) Stop() {
 	e.cancel()
@@ -171,7 +221,12 @@ func (e *Engine) Stop() {
 	if e.session != nil {
 		_ = e.session.Stop()
 	}
-	e.logger.Info("goetw: ETW session stopped", "totalEvents", e.totalEvents)
+
+	e.logger.Info("goetw: ETW session stopped",
+		"total_events", e.stats.totalEvents.Load(),
+		"pid_matches", e.stats.pidMatches.Load(),
+		"mapped_events", e.stats.mappedEvents.Load(),
+		"parse_failures", e.stats.parseFailures.Load())
 }
 
 func getKeysGoetw(props teketw.Properties) []string {
@@ -180,4 +235,12 @@ func getKeysGoetw(props teketw.Properties) []string {
 		keys = append(keys, p.Name)
 	}
 	return keys
+}
+
+func dumpFieldsGoetw(props teketw.Properties) []string {
+	var fields []string
+	for _, p := range props {
+		fields = append(fields, fmt.Sprintf("%s=%v(%T)", p.Name, p.Value, p.Value))
+	}
+	return fields
 }

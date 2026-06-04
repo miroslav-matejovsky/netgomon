@@ -5,6 +5,7 @@ package etw
 import (
 	"fmt"
 	"net"
+	"strings"
 )
 
 // ParseIP extracts an IP address string from various ETW EventData value types.
@@ -63,6 +64,8 @@ func ParsePID(val interface{}) uint32 {
 		return uint32(v)
 	case int32:
 		return uint32(v)
+	case int64:
+		return uint32(v)
 	case uint64:
 		return uint32(v)
 	case float64:
@@ -71,6 +74,50 @@ func ParsePID(val interface{}) uint32 {
 	var p uint32
 	_, _ = fmt.Sscanf(fmt.Sprintf("%v", val), "%d", &p)
 	return p
+}
+
+// pidFieldNames lists recognized PID field names in ETW EventData (lowercase for comparison).
+var pidFieldNames = []string{"pid", "processid"}
+
+// FindPIDInMap searches a map of ETW EventData fields for a PID value.
+// Uses case-insensitive matching on known PID field names.
+// Returns 0 if no PID field found.
+func FindPIDInMap(fields map[string]interface{}) uint32 {
+	for k, v := range fields {
+		if isPIDKey(k) {
+			return ParsePID(v)
+		}
+	}
+	return 0
+}
+
+// FindPIDInSlice searches a slice of key-value pairs for a PID value.
+// Each pair must have Name and Value fields (satisfied by goetw Properties).
+// Uses case-insensitive matching on known PID field names.
+// Returns 0 if no PID field found.
+func FindPIDInSlice(pairs []NamedValue) uint32 {
+	for _, p := range pairs {
+		if isPIDKey(p.Name) {
+			return ParsePID(p.Value)
+		}
+	}
+	return 0
+}
+
+// NamedValue is a name-value pair used for ETW event properties.
+type NamedValue struct {
+	Name  string
+	Value interface{}
+}
+
+func isPIDKey(key string) bool {
+	lower := strings.ToLower(key)
+	for _, name := range pidFieldNames {
+		if lower == name {
+			return true
+		}
+	}
+	return false
 }
 
 // EventMapping holds the parsed result of mapping an ETW Event ID to network tuple fields.
