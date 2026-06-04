@@ -81,7 +81,8 @@ tasks:
     desc: Run integration tests (requires LLM model download, saved to .test-results/)
     silent: true
     cmds:
-      - pwsh -NoProfile -NonInteractive -File taskfiles/test-integration.ps1
+      - task: build-probe
+      - go test ./internal/etw/goetw/ ./internal/etw/rawsec/ ./internal/iphelper/ -v -run Integration
 
   build:
     desc: Build the application (output in dist/)
