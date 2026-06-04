@@ -74,7 +74,13 @@ func (e *Engine) Start() error {
 	// ProcessEvents runs the callback for each event and blocks.
 	go func() {
 		if err := e.consumer.ProcessEvents(func(event *teketw.Event) {
-			if event.System.Execution.ProcessID != e.targetPID {
+			pidData, _ := event.GetProperty("PID")
+			actualPID := etwapi.ParsePID(pidData)
+			if actualPID == 0 {
+				actualPID = event.System.Execution.ProcessID
+			}
+
+			if actualPID != e.targetPID {
 				return
 			}
 
@@ -99,6 +105,11 @@ func (e *Engine) Start() error {
 			localPort := etwapi.ParsePort(localPortData)
 
 			if remoteIP == "" || remotePort == 0 {
+				e.logger.Info("goetw: failed to parse remote endpoint",
+					"event_id", event.System.EventID,
+					"remote_ip_key", mapping.RemoteIPKey,
+					"remote_port_key", mapping.RemotePortKey,
+					"all_keys", getKeysGoetw(event.EventData))
 				return
 			}
 
@@ -142,9 +153,18 @@ func (e *Engine) Stop() {
 	if e.consumer != nil {
 		_ = e.consumer.Stop()
 	}
+
 	if e.session != nil {
 		_ = e.session.Stop()
 	}
 	close(e.events)
 	e.logger.Info("goetw: ETW session stopped")
+}
+
+func getKeysGoetw(props teketw.Properties) []string {
+	var keys []string
+	for _, p := range props {
+		keys = append(keys, p.Name)
+	}
+	return keys
 }

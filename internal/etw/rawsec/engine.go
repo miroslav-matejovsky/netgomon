@@ -72,7 +72,12 @@ func (e *Engine) Start() error {
 	e.consumer.FromSessions(e.session)
 
 	e.consumer.EventCallback = func(event *rawetw.Event) error {
-		if event.System.Execution.ProcessID != e.targetPID {
+		actualPID := etwapi.ParsePID(event.EventData["PID"])
+		if actualPID == 0 {
+			actualPID = event.System.Execution.ProcessID
+		}
+
+		if actualPID != e.targetPID {
 			return nil
 		}
 
@@ -80,7 +85,8 @@ func (e *Engine) Start() error {
 		if mapping == nil {
 			e.logger.Debug("rawsec: unmapped ETW event",
 				"event_id", event.System.EventID,
-				"pid", event.System.Execution.ProcessID)
+				"pid", event.System.Execution.ProcessID,
+				"keys", getKeysRaw(event.EventData))
 			return nil
 		}
 
@@ -90,6 +96,13 @@ func (e *Engine) Start() error {
 		localPort := etwapi.ParsePort(event.EventData[mapping.LocalPortKey])
 
 		if remoteIP == "" || remotePort == 0 {
+			e.logger.Info("rawsec: failed to parse remote endpoint",
+				"event_id", event.System.EventID,
+				"remote_ip_key", mapping.RemoteIPKey,
+				"remote_port_key", mapping.RemotePortKey,
+				"remote_ip_val", fmt.Sprintf("%v", event.EventData[mapping.RemoteIPKey]),
+				"remote_port_val", fmt.Sprintf("%v", event.EventData[mapping.RemotePortKey]),
+				"all_keys", getKeysRaw(event.EventData))
 			return nil
 		}
 
@@ -136,4 +149,12 @@ func (e *Engine) Stop() {
 		_ = e.session.Stop()
 	}
 	e.logger.Info("rawsec: ETW session stopped")
+}
+
+func getKeysRaw(m map[string]interface{}) []string {
+	var keys []string
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }

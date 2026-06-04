@@ -22,6 +22,15 @@ func TestParseIP(t *testing.T) {
 	require.Equal(t, "127.0.0.1", ParseIP(uint32(0x0100007f)))
 }
 
+func TestParsePID(t *testing.T) {
+	require.Equal(t, uint32(0), ParsePID(nil))
+	require.Equal(t, uint32(1234), ParsePID(uint32(1234)))
+	require.Equal(t, uint32(5678), ParsePID(int(5678)))
+	require.Equal(t, uint32(9012), ParsePID(uint64(9012)))
+	require.Equal(t, uint32(3456), ParsePID(float64(3456.0)))
+	require.Equal(t, uint32(7890), ParsePID("7890"))
+}
+
 func TestParsePort(t *testing.T) {
 	require.Equal(t, uint16(0), ParsePort(nil))
 	require.Equal(t, uint16(80), ParsePort(uint16(80)))
