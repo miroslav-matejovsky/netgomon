@@ -87,6 +87,10 @@ func (e *Engine) Start() error {
 				actualPID = event.System.Execution.ProcessID
 			}
 
+			if e.totalEvents <= 50 {
+				e.logger.Info("goetw: event dump", "event_id", event.System.EventID, "exec_pid", event.System.Execution.ProcessID, "actualPID", actualPID, "keys", getKeysGoetw(event.EventData))
+			}
+
 			if actualPID != e.targetPID {
 				return
 			}

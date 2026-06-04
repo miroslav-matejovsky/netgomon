@@ -3,6 +3,7 @@
 package monitor
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -106,12 +107,14 @@ type Monitor struct {
 	ReportPath string
 	LogPath    string
 	Interval   time.Duration
-	logger     *Logger
-	mu         sync.RWMutex
+
+	logger  *Logger
+	mu      sync.RWMutex
+	engines []etwapi.Engine
 }
 
 // NewMonitor creates a Monitor instance.
-func NewMonitor(targetExe, reportPath, logPath string, interval time.Duration) *Monitor {
+func NewMonitor(targetExe, reportPath, logPath string, interval time.Duration, engines ...etwapi.Engine) *Monitor {
 	if interval <= 0 {
 		interval = 100 * time.Millisecond
 	}
@@ -120,11 +123,12 @@ func NewMonitor(targetExe, reportPath, logPath string, interval time.Duration) *
 		ReportPath: reportPath,
 		LogPath:    logPath,
 		Interval:   interval,
+		engines:    engines,
 	}
 }
 
 // Run waits for the next process instance and monitors it.
-func (m *Monitor) Run() error {
+func (m *Monitor) Run(ctx context.Context) error {
 	logger, err := NewLogger(m.LogPath)
 	if err != nil {
 		return fmt.Errorf("failed to create log file: %w", err)
@@ -165,11 +169,16 @@ func (m *Monitor) Run() error {
 		if pid != 0 {
 			break
 		}
-		time.Sleep(100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			m.logger.Info("Monitor cancelled while waiting for process.")
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
 
 	m.logger.Info("Found next process instance. PID: %d, Path: %s", pid, path)
-	return m.monitorPID(pid, path)
+	return m.monitorPID(ctx, pid, path)
 }
 
 func (m *Monitor) findCurrentPIDs() (map[uint32]string, error) {
@@ -228,7 +237,7 @@ func (m *Monitor) match(procPath string) bool {
 	return false
 }
 
-func (m *Monitor) monitorPID(pid uint32, path string) error {
+func (m *Monitor) monitorPID(ctx context.Context, pid uint32, path string) error {
 	m.logger.Info("Opening handle to target PID %d...", pid)
 	h, err := windows.OpenProcess(windows.SYNCHRONIZE|windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
 	if err != nil {
@@ -253,28 +262,37 @@ func (m *Monitor) monitorPID(pid uint32, path string) error {
 	// slog logger for ETW engines.
 	slogLogger := slog.New(slog.NewJSONHandler(m.logger.file, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	// Start both ETW engines.
+	// Start both ETW engines if none injected.
 	var engines []etwapi.Engine
 	var engineNames []string
 
 	m.logger.Info("Attempting to initialize ETW tracing engines...")
 
-	rawsecEng := rawsec.New(pid, slogLogger)
-	if err := rawsecEng.Start(); err == nil {
-		engines = append(engines, rawsecEng)
-		engineNames = append(engineNames, "rawsec")
-		m.logger.Info("rawsec ETW engine started successfully")
+	if len(m.engines) > 0 {
+		engines = m.engines
+		for _, eng := range engines {
+			_ = eng.Start()
+			engineNames = append(engineNames, "mock")
+		}
+		m.logger.Info("Using injected mock engines for testing")
 	} else {
-		m.logger.Warn("rawsec ETW engine failed: %v", err)
-	}
+		rawsecEng := rawsec.New(pid, slogLogger)
+		if err := rawsecEng.Start(); err == nil {
+			engines = append(engines, rawsecEng)
+			engineNames = append(engineNames, "rawsec")
+			m.logger.Info("rawsec ETW engine started successfully")
+		} else {
+			m.logger.Warn("rawsec ETW engine failed: %v", err)
+		}
 
-	goetwEng := goetw.New(pid, slogLogger)
-	if err := goetwEng.Start(); err == nil {
-		engines = append(engines, goetwEng)
-		engineNames = append(engineNames, "goetw")
-		m.logger.Info("goetw ETW engine started successfully")
-	} else {
-		m.logger.Warn("goetw ETW engine failed: %v", err)
+		goetwEng := goetw.New(pid, slogLogger)
+		if err := goetwEng.Start(); err == nil {
+			engines = append(engines, goetwEng)
+			engineNames = append(engineNames, "goetw")
+			m.logger.Info("goetw ETW engine started successfully")
+		} else {
+			m.logger.Warn("goetw ETW engine failed: %v", err)
+		}
 	}
 
 	usePolling := len(engines) == 0
@@ -378,6 +396,13 @@ func (m *Monitor) monitorPID(pid uint32, path string) error {
 
 	// Main monitoring loop.
 	for {
+		select {
+		case <-ctx.Done():
+			m.logger.Info("Monitor cancelled by user (signal).")
+			goto cleanup
+		default:
+		}
+
 		snap()
 
 		// Continuously update report.
@@ -390,8 +415,16 @@ func (m *Monitor) monitorPID(pid uint32, path string) error {
 			m.logger.Info("Target process exit detected by WaitForSingleObject.")
 			break
 		}
-		time.Sleep(m.Interval)
+
+		select {
+		case <-ctx.Done():
+			m.logger.Info("Monitor cancelled by user (signal).")
+			goto cleanup
+		case <-time.After(m.Interval):
+		}
 	}
+
+cleanup:
 
 	// Final sweep if polling.
 	snap()

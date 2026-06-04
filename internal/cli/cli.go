@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -14,7 +15,7 @@ import (
 )
 
 // Run parses arguments and starts the monitor.
-func Run() error {
+func Run(ctx context.Context) error {
 	if !isAdmin() {
 		return errors.New("administrator privileges are required to run this tool")
 	}
@@ -49,7 +50,7 @@ func Run() error {
 	}
 
 	m := monitor.NewMonitor(target, reportPath, logPath, 100*time.Millisecond)
-	return m.Run()
+	return m.Run(ctx)
 }
 
 func isAdmin() bool {

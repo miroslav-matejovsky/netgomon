@@ -85,6 +85,10 @@ func (e *Engine) Start() error {
 			actualPID = event.System.Execution.ProcessID
 		}
 
+		if e.totalEvents <= 50 {
+			e.logger.Info("rawsec: event dump", "event_id", event.System.EventID, "exec_pid", event.System.Execution.ProcessID, "actualPID", actualPID, "keys", getKeysRaw(event.EventData))
+		}
+
 		if actualPID != e.targetPID {
 			return nil
 		}
@@ -142,7 +146,6 @@ func (e *Engine) Start() error {
 
 	go func() {
 		_ = e.consumer.Start()
-		close(e.events)
 	}()
 
 	e.logger.Info("rawsec: ETW session started", "pid", e.targetPID)

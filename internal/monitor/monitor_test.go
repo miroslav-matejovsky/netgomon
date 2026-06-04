@@ -3,11 +3,16 @@
 package monitor
 
 import (
+	"context"
 	"encoding/binary"
 	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
+	etwapi "github.com/miroslav-matejovsky/netwinmon/internal/etw"
 	"github.com/stretchr/testify/require"
 )
 
@@ -80,4 +85,72 @@ func TestParseUDPV4Table(t *testing.T) {
 	require.Equal(t, "192.168.1.50", ep.LocalIP.String())
 	require.Equal(t, uint16(53), ep.LocalPort)
 	require.Equal(t, uint32(5678), ep.PID)
+}
+
+type mockEngine struct {
+	events chan etwapi.NetworkEvent
+}
+
+func (m *mockEngine) Events() <-chan etwapi.NetworkEvent {
+	return m.events
+}
+
+func (m *mockEngine) Start() error {
+	return nil
+}
+
+func (m *mockEngine) Stop() {
+	close(m.events)
+}
+
+func TestMonitorWithMockEngine(t *testing.T) {
+	tmpDir := t.TempDir()
+	reportPath := filepath.Join(tmpDir, "report.json")
+	logPath := filepath.Join(tmpDir, "monitor.log")
+
+	// Use ping.exe as target
+	targetExe := "ping.exe"
+
+	mock := &mockEngine{
+		events: make(chan etwapi.NetworkEvent, 10),
+	}
+	m := NewMonitor(targetExe, reportPath, logPath, 10*time.Millisecond, mock)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	go func() {
+		// Spawn a process so the monitor can find it
+		time.Sleep(50 * time.Millisecond)
+		cmd := exec.Command("ping", "127.0.0.1", "-n", "2")
+		_ = cmd.Start()
+		defer func() {
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill()
+			}
+		}()
+
+		time.Sleep(50 * time.Millisecond)
+		mock.events <- etwapi.NetworkEvent{
+			RemoteIP:   "1.2.3.4",
+			RemotePort: 80,
+			LocalIP:    "127.0.0.1",
+			LocalPort:  12345,
+			IsUDP:      false,
+			State:      "CONNECT",
+			Timestamp:  time.Now(),
+			Tool:       "mock",
+		}
+	}()
+
+	err := m.Run(ctx)
+	if err != nil {
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	}
+
+	require.FileExists(t, reportPath)
+	content, err := os.ReadFile(reportPath)
+	require.NoError(t, err)
+	require.Contains(t, string(content), "1.2.3.4")
+	require.Contains(t, string(content), "mock")
 }
