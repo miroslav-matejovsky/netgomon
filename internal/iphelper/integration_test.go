@@ -145,7 +145,7 @@ func findProbe(t *testing.T, logger *slog.Logger) string {
 	t.Helper()
 
 	candidates := []string{
-		filepath.Join("..", "..", "..", "dist", "probe.exe"),
+		filepath.Join("..", "..", "dist", "probe.exe"),
 	}
 
 	for _, c := range candidates {
