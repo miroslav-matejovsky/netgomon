@@ -149,6 +149,7 @@ func (e *Engine) Start() error {
 		}); err != nil {
 			e.logger.Error("goetw: event processing error", "error", err)
 		}
+		close(e.events)
 	}()
 
 	if err := e.consumer.Start(); err != nil {
@@ -170,7 +171,6 @@ func (e *Engine) Stop() {
 	if e.session != nil {
 		_ = e.session.Stop()
 	}
-	close(e.events)
 	e.logger.Info("goetw: ETW session stopped", "totalEvents", e.totalEvents)
 }
 

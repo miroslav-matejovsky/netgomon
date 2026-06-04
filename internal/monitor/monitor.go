@@ -111,6 +111,17 @@ type Monitor struct {
 	logger  *Logger
 	mu      sync.RWMutex
 	engines []etwapi.Engine
+
+	activeProcesses map[uint32]*ProcessState
+}
+
+// ProcessState represents the real-time state of a monitored process.
+type ProcessState struct {
+	PID       uint32                        `json:"pid"`
+	Path      string                        `json:"path"`
+	StartTime time.Time                     `json:"startTime"`
+	TCP       map[string]*TCPEndpointRecord `json:"tcp"`
+	UDP       map[string]*UDPEndpointRecord `json:"udp"`
 }
 
 // NewMonitor creates a Monitor instance.
@@ -119,12 +130,47 @@ func NewMonitor(targetExe, reportPath, logPath string, interval time.Duration, e
 		interval = 100 * time.Millisecond
 	}
 	return &Monitor{
-		TargetExe:  targetExe,
-		ReportPath: reportPath,
-		LogPath:    logPath,
-		Interval:   interval,
-		engines:    engines,
+		TargetExe:       targetExe,
+		ReportPath:      reportPath,
+		LogPath:         logPath,
+		Interval:        interval,
+		engines:         engines,
+		activeProcesses: make(map[uint32]*ProcessState),
 	}
+}
+
+// GetState returns a snapshot of all active process states.
+func (m *Monitor) GetState() map[uint32]*ProcessState {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	state := make(map[uint32]*ProcessState)
+	for pid, ps := range m.activeProcesses {
+		pCopy := &ProcessState{
+			PID:       ps.PID,
+			Path:      ps.Path,
+			StartTime: ps.StartTime,
+			TCP:       make(map[string]*TCPEndpointRecord),
+			UDP:       make(map[string]*UDPEndpointRecord),
+		}
+		for k, v := range ps.TCP {
+			vCopy := *v
+			// deep copy states map if needed, but it is created per connection.
+			if v.States != nil {
+				vCopy.States = make(map[string]int)
+				for sk, sv := range v.States {
+					vCopy.States[sk] = sv
+				}
+			}
+			pCopy.TCP[k] = &vCopy
+		}
+		for k, v := range ps.UDP {
+			vCopy := *v
+			pCopy.UDP[k] = &vCopy
+		}
+		state[pid] = pCopy
+	}
+	return state
 }
 
 // Run waits for the next process instance and monitors it.
@@ -258,6 +304,22 @@ func (m *Monitor) monitorPID(ctx context.Context, pid uint32, path string) error
 	// Aggregation maps (keyed by "tool:remoteIP:remotePort").
 	tcpMap := make(map[string]*TCPEndpointRecord)
 	udpMap := make(map[string]*UDPEndpointRecord)
+
+	m.mu.Lock()
+	m.activeProcesses[pid] = &ProcessState{
+		PID:       pid,
+		Path:      path,
+		StartTime: startTime,
+		TCP:       tcpMap,
+		UDP:       udpMap,
+	}
+	m.mu.Unlock()
+
+	defer func() {
+		m.mu.Lock()
+		delete(m.activeProcesses, pid)
+		m.mu.Unlock()
+	}()
 
 	// slog logger for ETW engines.
 	slogLogger := slog.New(slog.NewJSONHandler(m.logger.file, &slog.HandlerOptions{Level: slog.LevelDebug}))

@@ -1,7 +1,2 @@
-
-- The goetw Engine.Start() uses a 200ms timeout heuristic to detect fast failures. If the real library takes longer to fail, adjust the timeout or use a different synchronization approach.
-- Verify both ETW engines can run simultaneously without conflicting ETW sessions on a real Windows machine with admin privileges.
-- The rawsec engine closes the events channel in the consumer goroutine, but the goetw engine closes it in Stop(). Unify this pattern - closing in Stop() risks panic if consumer goroutine sends after Stop(). Consider sync.Once for channel close.
 - Step 2 from plan.md: Multi-process monitoring support.
-- Step 3 from plan.md: HTTP API for current state.
 - Step 4 from plan.md: Basic behavior analysis.

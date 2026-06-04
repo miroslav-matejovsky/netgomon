@@ -146,6 +146,7 @@ func (e *Engine) Start() error {
 
 	go func() {
 		_ = e.consumer.Start()
+		close(e.events)
 	}()
 
 	e.logger.Info("rawsec: ETW session started", "pid", e.targetPID)
@@ -161,7 +162,6 @@ func (e *Engine) Stop() {
 	if e.session != nil {
 		_ = e.session.Stop()
 	}
-	close(e.events)
 	e.logger.Info("rawsec: ETW session stopped", "totalEvents", e.totalEvents)
 }
 

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/miroslav-matejovsky/netwinmon/internal/api"
 	"github.com/miroslav-matejovsky/netwinmon/internal/monitor"
 	"golang.org/x/sys/windows"
 )
@@ -50,6 +51,17 @@ func Run(ctx context.Context) error {
 	}
 
 	m := monitor.NewMonitor(target, reportPath, logPath, 100*time.Millisecond)
+
+	apiSrv := api.NewServer("127.0.0.1:8080", m)
+	if err := apiSrv.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to start API server: %v\n", err)
+	}
+	defer func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = apiSrv.Stop(stopCtx)
+	}()
+
 	return m.Run(ctx)
 }
 

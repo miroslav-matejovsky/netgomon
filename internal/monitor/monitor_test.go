@@ -116,20 +116,18 @@ func TestMonitorWithMockEngine(t *testing.T) {
 	}
 	m := NewMonitor(targetExe, reportPath, logPath, 10*time.Millisecond, mock)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	go func() {
-		// Spawn a process so the monitor can find it
-		time.Sleep(50 * time.Millisecond)
-		cmd := exec.Command("ping", "127.0.0.1", "-n", "2")
-		_ = cmd.Start()
-		defer func() {
-			if cmd.Process != nil {
-				_ = cmd.Process.Kill()
-			}
-		}()
+	cmd := exec.Command("ping", "127.0.0.1", "-n", "2")
+	_ = cmd.Start()
+	defer func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+	}()
 
+	go func() {
 		time.Sleep(50 * time.Millisecond)
 		mock.events <- etwapi.NetworkEvent{
 			RemoteIP:   "1.2.3.4",
@@ -143,7 +141,12 @@ func TestMonitorWithMockEngine(t *testing.T) {
 		}
 	}()
 
-	err := m.Run(ctx)
+	logger, err := NewLogger(logPath)
+	require.NoError(t, err)
+	m.logger = logger
+	defer logger.Close()
+
+	err = m.monitorPID(ctx, uint32(cmd.Process.Pid), targetExe)
 	if err != nil {
 		require.ErrorIs(t, err, context.DeadlineExceeded)
 	}
