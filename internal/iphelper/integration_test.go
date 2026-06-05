@@ -20,11 +20,11 @@ func TestIntegrationIPHelperWithProbe(t *testing.T) {
 	logFile := setupTestLog(t, "iphelper_integration")
 	logger := slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	probePath := findProbe(t, logger)
+	probePath := buildProbe(t, logger)
 	logger.Info("probe path resolved", "path", probePath)
 
 	// Start probe in fast mode.
-	cmd := exec.Command(probePath, "fast")
+	cmd := exec.CommandContext(t.Context(), probePath, "fast")
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	err := cmd.Start()
@@ -143,26 +143,17 @@ func setupTestLog(t *testing.T, prefix string) *os.File {
 	return f
 }
 
-// findProbe locates dist/probe.exe relative to the test directory.
-func findProbe(t *testing.T, logger *slog.Logger) string {
+// buildProbe compiles the probe command into a temporary directory.
+func buildProbe(t *testing.T, logger *slog.Logger) string {
 	t.Helper()
 
-	// iphelper is at internal/iphelper/ - 2 levels from root.
-	candidates := []string{
-		filepath.Join("..", "..", "dist", "probe.exe"),
-	}
-
-	for _, c := range candidates {
-		abs, err := filepath.Abs(c)
-		if err != nil {
-			continue
-		}
-		logger.Debug("checking probe candidate", "path", abs)
-		if _, err := os.Stat(abs); err == nil {
-			return abs
-		}
-	}
-
-	t.Skipf("Skipping: probe.exe not found in dist/ - run 'task build' first")
-	return ""
+	tmpDir := t.TempDir()
+	probePath := filepath.Join(tmpDir, "probe_iphelper.exe")
+	
+	logger.Info("building probe", "output_path", probePath)
+	cmd := exec.Command("go", "build", "-o", probePath, "github.com/miroslav-matejovsky/netwinmon/cmd/probe")
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "failed to build probe: %s", string(out))
+	
+	return probePath
 }
