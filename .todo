@@ -1,6 +1,9 @@
 - Implement ETW PID filter descriptor (EVENT_FILTER_TYPE_PID) - requires investigating if goetw/rawsec expose ENABLE_TRACE_PARAMETERS. Would reduce CPU overhead on busy machines by filtering events at kernel level instead of userspace.
 - Flag-based CLI (--target, --report, --log, --new-only) to replace positional args. Currently still uses positional args.
-- Verify ETW event capture with admin privileges - run probe.exe with admin and check monitor.log for PID field names, event data types, and whether connections appear.
+- Verify ETW event capture with admin privileges - run integration tests as admin: `task build && go test ./internal/etw/custom/ ./internal/etw/goetw/ ./internal/etw/rawsec/ -v -run Integration`. The custom engine uses direct Win32 syscalls (runtime.LockOSThread for ProcessTrace) and may succeed where goetw/rawsec failed.
+- If custom engine works under admin, consider removing goetw/rawsec dependencies to simplify the codebase and reduce third-party attack surface.
+- The custom ETW engine parses EVENT_RECORD.UserData using hardcoded Kernel-Network event layouts. If event layouts change in future Windows versions, parsing may break. Consider adding TDH fallback for unknown event schemas.
+- Implement ETW PID filter descriptor (EVENT_FILTER_TYPE_PID) - requires ENABLE_TRACE_PARAMETERS in EnableTraceEx2. Would reduce CPU overhead on busy machines by filtering events at kernel level instead of userspace.
 - Consider adding connection duration tracking (time between CONNECT and DISCONNECT events for same endpoint).
 - Consider adding DNS resolution correlation - match UDP port 53 traffic with subsequent TCP connections.
 - Verify that context cancellation correctly shuts down ETW engines (goetw, rawsec) without resource leaks, now that context is passed from the main application.

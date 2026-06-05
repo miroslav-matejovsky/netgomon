@@ -5,13 +5,13 @@
 //     Supports multiple target executables monitored concurrently.
 //   - Connection Tracking: Snaps TCP and UDP tables (polling fallback) or consumes kernel trace events (ETW).
 //   - Endpoint Aggregation: Groups network events by remote endpoint (IP and port) to show where connections went and how often.
-//   - Multi-Engine: Supports ETW backends (goetw primary, rawsec fallback). Each record is tagged with a "tool" field.
+//   - Multi-Engine: Supports ETW backends (custom primary, goetw/rawsec fallback). Each record is tagged with a "tool" field.
 //   - Behavior Analysis: Tracks connection failures (CONNECT_FAIL) and calculates event frequency (events/minute).
 //
 // Design Decisions & Tradeoffs:
 //   - Multi-Process: Monitor.Run() continuously scans for target processes and spawns a goroutine per PID.
 //     Each PID has its own aggregation maps and process lifetime watcher.
-//   - Single ETW Backend: Uses goetw as primary, falls back to rawsec only if goetw fails.
+//   - Single ETW Backend: Uses custom engine (direct Win32 syscalls) as primary, falls back to goetw then rawsec.
 //     Avoids double-counting events from the same provider.
 //   - Fallback Engine (Polling): Automatically falls back to IP Helper tables if no ETW engines start.
 //   - Thread Safety: A sync.RWMutex on Monitor protects aggregation maps and activeProcesses.

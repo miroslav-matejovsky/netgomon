@@ -64,6 +64,7 @@
   ],
   "cSpell.words": [
     "0xrawsec",
+    "advapi",
     "appliedgocode",
     "connectionless",
     "covermode",
@@ -90,6 +91,7 @@
     "rawsec",
     "SNAPPROCESS",
     "stretchr",
+    "syscalls",
     "taskfiles",
     "TCPV4",
     "tekert",

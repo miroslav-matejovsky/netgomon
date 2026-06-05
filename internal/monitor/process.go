@@ -9,6 +9,7 @@ import (
 	"time"
 
 	etwapi "github.com/miroslav-matejovsky/netwinmon/internal/etw"
+	"github.com/miroslav-matejovsky/netwinmon/internal/etw/custom"
 	"github.com/miroslav-matejovsky/netwinmon/internal/etw/goetw"
 	"github.com/miroslav-matejovsky/netwinmon/internal/etw/rawsec"
 	"github.com/miroslav-matejovsky/netwinmon/internal/iphelper"
@@ -46,23 +47,38 @@ func (m *Monitor) Run(ctx context.Context) error {
 		}
 		m.logger.Info("Using injected mock engines for testing", "pid", m.PID)
 	} else {
-		// Run goetw and rawsec in parallel.
-		goetwEng := goetw.New(ctx, m.PID, m.logger)
-		if err := goetwEng.Start(); err == nil {
-			engines = append(engines, goetwEng)
-			engineNames = append(engineNames, "goetw")
-			m.logger.Info("goetw ETW engine started", "pid", m.PID)
+		// Try custom engine first (direct Win32 syscalls, no third-party deps).
+		customEng := custom.New(ctx, m.PID, m.logger)
+		if err := customEng.Start(); err == nil {
+			engines = append(engines, customEng)
+			engineNames = append(engineNames, "custom")
+			m.logger.Info("custom ETW engine started", "pid", m.PID)
 		} else {
-			m.logger.Warn("goetw ETW engine failed", "pid", m.PID, "error", err)
+			m.logger.Warn("custom ETW engine failed", "pid", m.PID, "error", err)
 		}
 
-		rawsecEng := rawsec.New(ctx, m.PID, m.logger)
-		if err := rawsecEng.Start(); err == nil {
-			engines = append(engines, rawsecEng)
-			engineNames = append(engineNames, "rawsec")
-			m.logger.Info("rawsec ETW engine started", "pid", m.PID)
-		} else {
-			m.logger.Warn("rawsec ETW engine failed", "pid", m.PID, "error", err)
+		// Fall back to goetw if custom failed.
+		if len(engines) == 0 {
+			goetwEng := goetw.New(ctx, m.PID, m.logger)
+			if err := goetwEng.Start(); err == nil {
+				engines = append(engines, goetwEng)
+				engineNames = append(engineNames, "goetw")
+				m.logger.Info("goetw ETW engine started", "pid", m.PID)
+			} else {
+				m.logger.Warn("goetw ETW engine failed", "pid", m.PID, "error", err)
+			}
+		}
+
+		// Fall back to rawsec if nothing else worked.
+		if len(engines) == 0 {
+			rawsecEng := rawsec.New(ctx, m.PID, m.logger)
+			if err := rawsecEng.Start(); err == nil {
+				engines = append(engines, rawsecEng)
+				engineNames = append(engineNames, "rawsec")
+				m.logger.Info("rawsec ETW engine started", "pid", m.PID)
+			} else {
+				m.logger.Warn("rawsec ETW engine failed", "pid", m.PID, "error", err)
+			}
 		}
 	}
 
