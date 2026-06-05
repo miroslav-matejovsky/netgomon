@@ -1,0 +1,99 @@
+
+OsName            : Microsoft Windows 11 Business
+OsVersion         : 10.0.26200
+WindowsBuildLabEx : 26100.1.amd64fre.ge_release.240331-1435
+
+System audit policy
+
+Category/Subcategory                      Setting
+Object Access
+  Filtering Platform Connection           No Auditing
+
+
+Provider                                 GUID
+-------------------------------------------------------------------------------
+Microsoft-Windows-Kernel-Network         {7DD42A49-5329-4832-8DFD-43D979153A88}
+
+Value               Keyword              Description
+-------------------------------------------------------------------------------
+0x0000000000000010  KERNEL_NETWORK_KEYWORD_IPV4 
+0x0000000000000020  KERNEL_NETWORK_KEYWORD_IPV6 
+0x8000000000000000  Microsoft-Windows-Kernel-Network/Analytic 
+
+Value               Level                Description
+-------------------------------------------------------------------------------
+0x04                win:Informational    Information 
+
+PID                 Image                
+-------------------------------------------------------------------------------
+0x00000000                               
+
+
+The command completed successfully.
+
+Data Collector Set                      Type                          Status
+-------------------------------------------------------------------------------
+Circular Kernel Context Logger          Trace                         Running 
+Eventlog-Security                       Trace                         Running 
+CimFSUnionFS-Filter                     Trace                         Running 
+DiagLog                                 Trace                         Running 
+Diagtrack-Listener                      Trace                         Running 
+EventLog-Application                    Trace                         Running 
+EventLog-Intel-SST-DVD-DVD_ETW_Telemetry Trace                         Running 
+SensorFramework-{92410660-c9bb-97e0-8602-f3e902e2933e} Trace                         Running 
+EventLog-System                         Trace                         Running 
+FilterMgr-Logger                        Trace                         Running 
+Intel-Gfx-Driver                        Trace                         Running 
+LwtNetLog                               Trace                         Running 
+Microsoft-Windows-Hotpatch-Autologger   Trace                         Running 
+Microsoft-Windows-Rdp-Graphics-RdpIdd-Trace Trace                         Running 
+NetCore                                 Trace                         Running 
+NtfsLog                                 Trace                         Running 
+RadioMgr                                Trace                         Running 
+NetCfgTrace                             Trace                         Running 
+ReFSLog                                 Trace                         Running 
+SensorFramework-{7a1190a9-1581-4e81-871e-fb5fbba6950c} Trace                         Running 
+UBPM                                    Trace                         Running 
+WdiContextLog                           Trace                         Running 
+WiFiDriverIHVSession                    Trace                         Running 
+WiFiSession                             Trace                         Running 
+WiManDriverIHVSession                   Trace                         Running 
+WPR_initiated_DiagTrackMiniLogger_WPR System Collector Trace                         Running 
+WPR_initiated_DiagTrackMiniLogger_OneTrace_User_Logger_20260424_1_EC_0 Trace                         Running 
+ScreenOnPowerStudyTraceSession          Trace                         Running 
+SleepStudyTraceSession                  Trace                         Running 
+CldFltLog                               Trace                         Running 
+SHS-06022026-083559-7-1ff               Trace                         Running 
+NVIDIA-NVTOPPS-NOCAT                    Trace                         Running 
+NVIDIA-NVTOPPS-FILTER                   Trace                         Running 
+MpWppCoreTracing-20260602-083409-00000003-100000000 Trace                         Running 
+Microsoft-Windows-Hotpatch-Monitoring   Trace                         Running 
+MpWppTracing-20260602-063410-00000003-fffffffeffffffff Trace                         Running 
+1DSListener                             Trace                         Running 
+pm2_igs                                 Trace                         Running 
+WINNETESP                               Trace                         Running 
+WinDiag-Realtime-Session                Trace                         Running 
+SenseIRTraceLogger                      Trace                         Running 
+WindowsUpdate_trace_log                 Trace                         Running 
+UpdateSessionOrchestration              Trace                         Running 
+MoUxCoreWorker                          Trace                         Running 
+wfpdiag                                 Trace                         Running 
+AppDomainStatistics_Activity-{1731C6B4-F4AF-4B0D-8D83-74FDE06F06AF} Trace                         Running 
+IntelligenceEvents_Activity-{24C30343-72F9-4729-99ED-2DEF5AE27D10} Trace                         Running 
+ExternalProvider_Session-{E02F1791-B3EB-48D9-B623-19890C7687C8} Trace                         Running 
+NetWinMon_24552_1780489234              Trace                         Running 
+SensorFramework-Live-Etw-92410660-c9bb-97e0-8602-f3e902e2933e Trace                         Running 
+NetWinMon_rawsec_35900_1780545998       Trace                         Running 
+NetWinMon_goetw_35900_1780545998        Trace                         Running 
+NetWinMon_goetw_27600_1780547025        Trace                         Running 
+
+The command completed successfully.
+
+NetWinMon_24552_1780489234              Trace                         Running 
+NetWinMon_rawsec_35900_1780545998       Trace                         Running 
+NetWinMon_goetw_35900_1780545998        Trace                         Running 
+NetWinMon_goetw_27600_1780547025        Trace                         Running 
+
+Error:
+Data Collector Set was not found.
+
