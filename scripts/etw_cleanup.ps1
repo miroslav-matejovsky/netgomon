@@ -1,0 +1,1 @@
+logman query -ets | Select-String "NetWinMon" | ForEach-Object { logman stop $_.Line.Split(' ')[0] -ets }
