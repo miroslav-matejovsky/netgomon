@@ -93,7 +93,10 @@ func (e *Engine) Start() error {
 	}
 
 	go func() {
-		_ = e.consumer.Start()
+		if err := e.consumer.Start(); err != nil {
+			e.logger.Error("rawsec: consumer start failed", "error", err)
+		}
+		e.consumer.Wait()
 		close(e.events)
 	}()
 

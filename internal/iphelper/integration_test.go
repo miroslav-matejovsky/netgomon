@@ -149,11 +149,11 @@ func buildProbe(t *testing.T, logger *slog.Logger) string {
 
 	tmpDir := t.TempDir()
 	probePath := filepath.Join(tmpDir, "probe_iphelper.exe")
-	
+
 	logger.Info("building probe", "output_path", probePath)
 	cmd := exec.Command("go", "build", "-o", probePath, "github.com/miroslav-matejovsky/netwinmon/cmd/probe")
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "failed to build probe: %s", string(out))
-	
+
 	return probePath
 }

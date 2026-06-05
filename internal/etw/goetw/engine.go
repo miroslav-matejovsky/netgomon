@@ -86,22 +86,21 @@ func (e *Engine) Start() error {
 	}
 
 	e.consumer = teketw.NewConsumer(e.ctx)
+	e.consumer.EventCallback = func(event *teketw.Event) error {
+		e.processEvent(event)
+		return nil
+	}
 	e.consumer.FromSessions(e.session)
-
-	// ProcessEvents runs the callback for each event and blocks.
-	go func() {
-		if err := e.consumer.ProcessEvents(func(event *teketw.Event) {
-			e.processEvent(event)
-		}); err != nil {
-			e.logger.Error("goetw: event processing error", "error", err)
-		}
-		close(e.events)
-	}()
 
 	if err := e.consumer.Start(); err != nil {
 		_ = e.session.Stop()
 		return fmt.Errorf("goetw: failed to start consumer: %w", err)
 	}
+
+	go func() {
+		e.consumer.Wait()
+		close(e.events)
+	}()
 
 	e.logger.Info("goetw: ETW session started", "pid", e.targetPID)
 	return nil
@@ -215,6 +214,9 @@ func (e *Engine) processEvent(event *teketw.Event) {
 func (e *Engine) Stop() {
 	e.cancel()
 	if e.consumer != nil {
+		if lastErr := e.consumer.LastError(); lastErr != nil {
+			e.logger.Error("goetw: consumer error", "error", lastErr)
+		}
 		_ = e.consumer.Stop()
 	}
 
