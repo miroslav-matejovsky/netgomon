@@ -78,17 +78,10 @@ tasks:
       - pwsh -NoProfile -NonInteractive -File taskfiles/coverage.ps1
 
   test-integration:
-    desc: Run integration tests (requires LLM model download, saved to .test-results/)
+    desc: Run integration tests (saved to .test-results/)
     silent: true
     cmds:
-      - echo "Cleaning and building probe.exe first since integration tests depend on it..."
-      - task: clean
-        # Set QUIET=1 to suppress output from clean since it can be very verbose and is not the main focus of this task.
-        vars:
-          QUIET: "1"
-      - task: build-probe
-      - echo "Running integration tests ..."
-      - go test ./internal/etw/goetw/ ./internal/etw/rawsec/ ./internal/iphelper/ -v -run Integration
+      - pwsh -NoProfile -NonInteractive -File taskfiles/test-integration.ps1
 
   build:
     desc: Build the application (output in dist/)
