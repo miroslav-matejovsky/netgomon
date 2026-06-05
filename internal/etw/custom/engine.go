@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 	"unsafe"
 
@@ -124,8 +125,18 @@ func (e *Engine) Start() error {
 	logfileSessionName, _ := windows.UTF16PtrFromString(e.sessionName)
 	logfile.LoggerName = logfileSessionName
 	logfile.Union1 = processTraceModeRealTime | processTraceModeEventRecord
-	logfile.EventRecordCallback = windows.NewCallback(eventRecordCallbackTrampoline)
+	// ETW callbacks use cdecl calling convention (critical on 32-bit, matches convention on 64-bit).
+	logfile.EventRecordCallback = syscall.NewCallbackCDecl(eventRecordCallbackTrampoline)
+	logfile.BufferCallback = syscall.NewCallbackCDecl(bufferCallbackTrampoline)
 	logfile.Context = unsafe.Pointer(e)
+
+	// Log struct sizes for debugging layout issues.
+	e.logger.Info("custom: struct sizes",
+		"eventTraceHeader", unsafe.Sizeof(eventTraceHeader{}),
+		"eventTrace", unsafe.Sizeof(eventTrace{}),
+		"traceLogfileHeader", unsafe.Sizeof(traceLogfileHeader{}),
+		"eventTraceLogfileW", unsafe.Sizeof(logfile),
+		"eventRecord", unsafe.Sizeof(eventRecord{}))
 
 	traceHandle, err := openTrace(&logfile)
 	if err != nil {
@@ -335,4 +346,10 @@ func eventRecordCallbackTrampoline(recordPtr unsafe.Pointer) uintptr {
 
 	eng.processEventRecord(rec)
 	return 0
+}
+
+// bufferCallbackTrampoline is called by ProcessTrace after each buffer is delivered.
+// Returns 1 to continue processing, 0 to stop.
+func bufferCallbackTrampoline(_ unsafe.Pointer) uintptr {
+	return 1
 }

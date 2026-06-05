@@ -151,12 +151,33 @@ func TestParseEventDataIPv4VsIPv6(t *testing.T) {
 }
 
 func TestStructSizes(t *testing.T) {
-	// Verify critical struct sizes match Windows expectations.
-	// eventDescriptor should be 16 bytes.
-	require.Equal(t, 16, int(unsafe.Sizeof(eventDescriptor{})))
+	// Verify critical struct sizes match Windows layout.
+	require.Equal(t, 16, int(unsafe.Sizeof(eventDescriptor{})), "eventDescriptor")
+	require.Equal(t, 48, int(unsafe.Sizeof(wnodeHeader{})), "wnodeHeader")
+	require.Equal(t, 48, int(unsafe.Sizeof(eventTraceHeader{})), "eventTraceHeader")
+	require.Equal(t, 88, int(unsafe.Sizeof(eventTrace{})), "eventTrace")
+	require.Equal(t, 4, int(unsafe.Sizeof(etwBufferContext{})), "etwBufferContext")
+}
 
-	// wnodeHeader should be 48 bytes.
-	require.Equal(t, 48, int(unsafe.Sizeof(wnodeHeader{})))
+func TestEventTraceLogfileOffsets(t *testing.T) {
+	// Verify field offsets of eventTraceLogfileW match Windows EVENT_TRACE_LOGFILEW layout.
+	// Incorrect offsets mean OpenTraceW reads callback pointers from wrong memory.
+	var logfile eventTraceLogfileW
+	require.Equal(t, uintptr(0), unsafe.Offsetof(logfile.LogFileName), "LogFileName")
+	require.Equal(t, uintptr(8), unsafe.Offsetof(logfile.LoggerName), "LoggerName")
+	require.Equal(t, uintptr(16), unsafe.Offsetof(logfile.CurrentTime), "CurrentTime")
+	require.Equal(t, uintptr(24), unsafe.Offsetof(logfile.BuffersRead), "BuffersRead")
+	require.Equal(t, uintptr(28), unsafe.Offsetof(logfile.Union1), "Union1")
+	require.Equal(t, uintptr(32), unsafe.Offsetof(logfile.CurrentEvent), "CurrentEvent")
+	require.Equal(t, uintptr(120), unsafe.Offsetof(logfile.LogfileHeader), "LogfileHeader")
+	require.Equal(t, uintptr(400), unsafe.Offsetof(logfile.BufferCallback), "BufferCallback")
+	require.Equal(t, uintptr(408), unsafe.Offsetof(logfile.BufferSize), "BufferSize")
+	require.Equal(t, uintptr(412), unsafe.Offsetof(logfile.Filled), "Filled")
+	require.Equal(t, uintptr(416), unsafe.Offsetof(logfile.EventsLost), "EventsLost")
+	require.Equal(t, uintptr(424), unsafe.Offsetof(logfile.EventRecordCallback), "EventRecordCallback")
+	require.Equal(t, uintptr(432), unsafe.Offsetof(logfile.IsKernelTrace), "IsKernelTrace")
+	require.Equal(t, uintptr(440), unsafe.Offsetof(logfile.Context), "Context")
+	require.Equal(t, uintptr(448), unsafe.Sizeof(logfile), "total size")
 }
 
 func TestKernelNetworkProviderGUID(t *testing.T) {

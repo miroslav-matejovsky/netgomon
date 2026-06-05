@@ -155,14 +155,28 @@ type eventTraceLogfileW struct {
 
 // eventTrace is the legacy EVENT_TRACE structure (inside EVENT_TRACE_LOGFILEW).
 // We don't use it directly but need it for correct struct layout.
+// sizeof: 0x58 (88 bytes on 64-bit)
 type eventTrace struct {
-	Header           [80]byte // EVENT_TRACE_HEADER (80 bytes on 64-bit)
+	Header           eventTraceHeader // 48 bytes
 	InstanceId       uint32
 	ParentInstanceId uint32
 	ParentGuid       windows.GUID
 	MofData          unsafe.Pointer
 	MofLength        uint32
 	UnionCtx         uint32
+}
+
+// eventTraceHeader is the legacy EVENT_TRACE_HEADER.
+// sizeof: 0x30 (48 bytes)
+type eventTraceHeader struct {
+	Size      uint16
+	Union1    uint16 // FieldTypeFlags or (HeaderType, MarkerFlags)
+	Union2    uint32 // Version or (Type, Level, Version)
+	ThreadId  uint32
+	ProcessId uint32
+	TimeStamp int64    // LARGE_INTEGER
+	Union3    [16]byte // Guid or GuidPtr
+	Union4    uint64   // (KernelTime,UserTime) or ProcessorTime
 }
 
 // traceLogfileHeader is inside EVENT_TRACE_LOGFILEW.
